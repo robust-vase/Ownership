@@ -721,3 +721,211 @@ Pipeline主流程:
 4.  **连锁物品**: 连锁物品也计入 `max_total_items` 和 `max_items_per_agent`。
 5.  **坐姿限制**: 坐下的人物伸手距离限制为60cm。
 6.  **资源释放**: 场景生成完成后自动释放所有人物和物品实体。
+
+
+
+
+# 场景重建与修改管线 (Rebuild & Variation Pipelines)
+
+本文档详细说明了 `table_pipline.py` 中用于**批量重建场景**和**生成场景变体 (Variation)** 的两个核心管线（Pipeline）。
+
+这两个管线都依赖于已有的数据，但它们的目的和工作方式有**重大区别**：
+
+1.  **`run_pipeline_rebuild_scenes` (场景重新生成)**:
+
+      * **输入**: 一个 `scenes_list.json` 文件。这个文件只包含场景的**高级参数**（如地图名、房间名、人物位置组合）。
+      * **工作方式**: 它会**重新运行**场景*生成*流程。它会重新生成人物、*重新随机放置*物品、重新生成动作。
+      * **用途**: 用于根据一组固定的*位置参数*，批量生成*全新*的、随机的场景。
+
+2.  **`run_pipeline_add_agent_variations` (场景修改)**:
+
+      * **输入**: 一个*完整*的 `scene_data.json` 文件。这个文件包含*所有*已保存的实体（人物、椅子、物品）的精确位置、旋转和属性。
+      * **工作方式**: 它会**精确重建**JSON中的原始场景，然后在此基础上应用*修改*（如添加/交换人物、改变状态、增减物品、移动物品）。
+      * **用途**: 用于对一个*已知*的、*已保存*的场景，生成大量可控的变体。
+
+-----
+
+## 1\. `run_pipeline_rebuild_scenes` (批量重新生成)
+
+此管线用于批量**重新生成**场景。它会读取一个包含多个场景*参数*的列表文件 (`scenes_list.json`)，然后遍历该列表，为每个条目从头开始生成一个全新的场景。
+
+### 函数定义
+
+```python
+def run_pipeline_rebuild_scenes(scenes_list_file="./ownership/rebulid_scene/scenes_list.json", 
+                                grid_dir="./ownership/table_boundaries",
+                                log_dir="./ownership/logs_rebuild", 
+                                max_item=5, filters=None, print_info=True):
+    """
+    从场景列表文件批量重建场景
+    
+    参考 run_pipeline_table_with_grid_items 的结构，但使用已保存的场景信息
+    
+    Args:
+        scenes_list_file: 场景列表JSON文件路径
+        grid_dir: 网格数据目录
+        log_dir: 重建结果保存目录
+        max_item: 最大物品数量
+        filters: 筛选条件（可选），例如:
+            {
+                'combination_type': 'face_to_face',
+                'agent_count': 2,
+                'map_name': 'SDBP_Map_001'
+            }
+        print_info: 是否打印详细信息
+    """
+```
+
+### 核心依赖
+
+  * `utils.rebuild.load_scenes_list`: 加载 `scenes_list.json`。
+  * `utils.rebuild.filter_scenes`: 根据 `filters` 参数筛选场景列表。
+  * `utils.rebuild.rebuild_scene_from_info`: **(核心)** 真正执行单个场景重建的函数。
+
+### 执行流程
+
+1.  **加载场景列表**: 调用 `load_scenes_list` 读取 `scenes_list_file` (一个 JSON 文件，通常由 `scan_and_extract_all_scenes` 生成)。
+2.  **筛选场景**: (可选) 如果提供了 `filters`，则调用 `filter_scenes` 缩小场景列表范围。
+3.  **遍历处理**: 遍历筛选后的 `scenes_list`。
+4.  **调用重建**: 对每个 `scene_info`，调用 `rebuild_scene_from_info`。
+5.  **`rebuild_scene_from_info` 内部流程**：
+    a.  打开 `scene_info` 中指定的地图、房间。
+    b.  查找 `table_id` 对应的桌子实体。
+    c.  加载该桌子的**网格数据** (`grid_dir`)。
+    d.  清空桌面上所有物品。
+    e.  **重新生成人物**: 调用 `generate_and_spawn_agents`，使用 `scene_info` 中的 `positions`（如 `['front', 'back']`）和 `agents_info`（如蓝图、坐姿）来*重新*创建人物。
+    f.  **重新放置物品**: 调用 `spawn_items_on_grid`（或 `spawn_items_on_grid_new`）在安全网格上*随机*放置*新*物品（最多 `max_item` 个）。
+    g.  **重新生成动作**: 调用 `generate_actions_for_all_agents` 为人物生成*新*的随机动作。
+    h.  **生成摄像头**: 创建环绕和俯视摄像头。
+    i.  **保存数据**: 拍摄图像并保存*新*的 `scene_data.json` 到 `log_dir`。
+    j.  **清理**: (可选) `auto_cleanup=True` 会删除所有生成的实体。
+
+-----
+
+## 2\. `run_pipeline_add_agent_variations` (场景修改与变体生成)
+
+此管线用于加载一个**已有的、完整的** `scene_data.json` 文件，**精确重建**该场景，然后对其应用各种**修改**（增/删/改 人物或物品），最后生成一个新的 `scene_data.json`。
+
+这是您用来“改变人与物品”的核心函数。
+
+### 函数定义
+
+```python
+def run_pipeline_add_agent_variations(json_file_path, base_output_dir=None, 
+                                      enable_add_agent=False, enable_change_status=False, 
+                                      enable_swap_blueprints=False, enable_replace_blueprint=False,
+                                      enable_change_action=False, enable_change_item_type=False,
+                                      item_type_change_counts=None,
+                                      adjust_item_count=0,
+                                      move_item_count=0,
+                                      print_info=True):
+    """
+    遍历所有可能的参数组合，为场景添加新人物和/或改变人物状态和/或交换/替换人物蓝图和/或改变人物动作和/或改变物品类型和/或增减物品数量和/或移动物品
+    
+    遍历策略：
+    1. swap_agent_blueprints: 遍历所有可能的人物蓝图交换对（可选，与enable_replace_blueprint互斥）
+    2. replace_agent_blueprint: 遍历所有可能的人物蓝图替换（可选，与enable_swap_blueprints互斥）
+    3. change_agent_status: 遍历所有人物的状态改变（可选）
+    4. change_agent_action: 遍历所有人物的动作改变（可选）
+    5. change_item_type_count: 遍历所有指定的物品类型修改数量（可选）
+    6. move_item_count: 移动物品到其他owner区域（可选）
+    7. reference_agent_index: 遍历所有已有人物作为参考（可选）
+    8. placement_strategy: 遍历 'face_to_face' 和 'same_side'
+    8. new_agent_trait: 遍历所有不重复的蓝图
+    
+    Args:
+        json_file_path: 原始场景JSON文件路径
+        base_output_dir: 输出基础目录（可选）
+        enable_add_agent: 是否启用添加新人物的遍历（默认False）
+        enable_change_status: 是否启用改变人物状态的遍历（默认False）
+        enable_swap_blueprints: 是否启用交换人物蓝图的遍历（默认False）
+                               ⚠️ 与 enable_replace_blueprint 互斥
+        enable_replace_blueprint: 是否启用替换人物蓝图的遍历（默认False）
+                                 ⚠️ 与 enable_swap_blueprints 互斥
+        enable_change_action: 是否启用改变人物动作的遍历（默认False）
+        enable_change_item_type: 是否启用改变物品类型的遍历（默认False）
+        item_type_change_counts: 物品类型修改数量列表（可选），例如 [1, 2, 3] 表示遍历修改1个、2个、3个物品
+                                如果为None且enable_change_item_type=True，将根据场景中物品数量自动生成
+        print_info: 是否打印详细信息
+        
+    示例：
+        # 只添加新人物
+        run_pipeline_add_agent_variations(..., enable_add_agent=True)
+        
+        # 只改变状态
+        run_pipeline_add_agent_variations(..., enable_change_status=True)
+        
+        # 只交换蓝图
+        run_pipeline_add_agent_variations(..., enable_swap_blueprints=True)
+        
+        # 只替换蓝图
+        run_pipeline_add_agent_variations(..., enable_replace_blueprint=True)
+        
+        # 只改变动作
+        run_pipeline_add_agent_variations(..., enable_change_action=True)
+        
+        # 只改变物品类型
+        run_pipeline_add_agent_variations(..., enable_change_item_type=True, item_type_change_counts=[1, 2])
+        
+        # 替换蓝图 + 改变状态 + 改变动作 + 改变物品类型
+        run_pipeline_add_agent_variations(..., enable_replace_blueprint=True, enable_change_status=True, 
+                                         enable_change_action=True, enable_change_item_type=True,
+                                         item_type_change_counts=[1, 2, 3])
+        
+        # 只重建原场景，不做任何修改
+        run_pipeline_add_agent_variations(..., enable_add_agent=False, enable_change_status=False, enable_swap_blueprints=False)
+    """
+```
+
+### 核心依赖
+
+  * `utils.rebuild.rebuild_and_modify_scene_from_json`: **(核心)** 真正执行单个场景修改的函数。
+
+### 执行流程
+
+1.  **加载父JSON**: 读取 `json_file_path` (一个*完整*的 `scene_data.json`)，获取已有人物、物品等信息。
+2.  **生成修改组合**: 根据所有 `enable_...` 标志，生成一个包含所有可能修改组合的巨大迭代列表。
+      * 例如，如果 `enable_swap_blueprints=True` (有3个选项) 且 `enable_change_status=True` (有3个选项)，它将生成 3x3=9 种组合进行测试。
+3.  **遍历组合**: 遍历所有生成的修改组合。
+4.  **调用修改函数**: 对每个组合，调用 `rebuild_and_modify_scene_from_json` 并传入修改参数。
+
+### `rebuild_and_modify_scene_from_json` (核心工作流)
+
+这个子函数是所有修改功能的实现中心。
+
+1.  **精确重建 (`rebuild_exact_scene_from_json`)**:
+
+      * 函数首先会调用 `rebuild_exact_scene_from_json`。
+      * 这个辅助函数会打开地图，并严格按照 `scene_data.json` 里的数据，在**精确的坐标**和**旋转**下，重新生成所有的椅子、人物和桌面物品。
+      * 它还会重新执行 `json` 中保存的动作（如 `reach_item`）。
+      * **结果**: 此时，模拟器中的场景与 `json` 文件完全一致。
+
+2.  **应用修改 (按顺序)**:
+
+      * **物品删除 (`adjust_item_count < 0`)**: 如果 `adjust_item_count` 为负数，它会*首先*从 `json` 数据中随机删除指定数量的物品，这些物品*不会*被重建。
+      * **物品类型修改 (`change_item_type_count > 0`)**: 随机选择指定数量的物品，并将其 `base_id` (蓝图) 替换为另一个人偏好的蓝图。`platefood` 会被当作一个整体处理。
+      * **蓝图修改 (`swap...` / `replace...`)**: 在重建人物*之前*，修改 `agents_data` 列表中的 `base_id`。
+      * **状态修改 (`change_agent_status`)**: 重建人物后，强制指定索引的人物改变状态（坐→站 或 站→坐）。
+          * `站→坐`: 人物会查找自己一侧（front/back/left/right）的**可用椅子**并坐下。如果找不到可用椅子，该次修改将**失败**并报错 `no_available_chair`。
+          * `坐→站`: 人物会站起来，并释放其占用的椅子（使其变为“可用”）。
+      * **物品增加 (`adjust_item_count > 0`)**: 在所有物品重建*之后*，调用 `adjust_table_items_count`，使用网格系统在可用空间中随机添加新物品。
+      * **物品移动 (`move_item_count > 0`)**: 在所有物品重建*之后*，调用 `move_items_to_other_owners`，随机选择 `move_item_count` 个物品，将它们移动到另一个人的区域，并更新其 `owner`。
+      * **动作修改 (`change_agent_action`)**: 强制指定索引的人物执行新动作（`reach_item`, `point_at_item`, `none`）。如果从 `point` 改为 `reach`，它会自动查找一个该人物拥有的、可触及的物品。
+      * **添加新人物 (`add_agent=True`)**: 在所有修改*最后*，调用 `add_agent_to_existing_scene`。
+          * 它会根据 `reference_agent_index`（参考人物）和 `placement_strategy`（放置策略）来确定新人物的方位（`front`/`back`/`left`/`right`）。
+          * 如果 `should_sit=True`，它会查找该方位的**可用椅子**。如果找不到，添加人物将**失败**。
+          * 新人物的蓝图会自动从 `AGENT_BLUEPRINT_MAPPING` 中选择一个*未被*场景中其他人使用的蓝图。
+
+3.  **保存结果**:
+
+      * 所有修改完成后，管线会生成*新*的摄像头，拍摄图像，并保存一个*新*的 `scene_data.json` 到以该修改命名的子文件夹中。
+      * 如果任何关键步骤失败（如找不到椅子坐下），该次组合将被标记为 `success: False`，并删除对应的失败文件夹。
+
+### 【重要】注意事项 (您提到的“对不上的地方”)
+
+  * **函数依赖**: `run_pipeline_rebuild_scenes` 和 `run_pipeline_add_agent_variations` 只是“启动器”。真正的逻辑在 `utils/rebuild.py` 文件的 `rebuild_scene_from_info` 和 `rebuild_and_modify_scene_from_json` 函数中。
+  * **椅子是关键**: 几乎所有的人物修改（`change_agent_status` 从站到坐，`add_agent` 坐下）都**强依赖**于场景中必须有**可用的椅子**（即 `rebuilt_chairs` 列表中未被 `occupied_chair_ids` 占用的椅子）。如果JSON中的椅子不够，或者位置不佳，很多修改组合都会失败。
+  * **动作修改逻辑**: 动作修改 (`change_agent_action`) 是基于索引的，并且会智能地选择目标。例如，从 `point_at_item` 改为 `reach_item` 时，它会*自动*在 `generated_items` 中查找该人物拥有的（`owner` 匹配）且可触及的物品作为新目标。
+  * **物品修改**: `adjust_item_count` 和 `move_item_count` 是在 `run_pipeline_add_agent_variations` 中新增的参数，它们依赖于 `utils.item_util.py` 中的 `adjust_table_items_count` 和 `move_items_to_other_owners` 函数。这些函数*同样依赖网格数据* (`grid_data`) 来执行碰撞检测和放置。
+
+
