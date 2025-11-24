@@ -12,20 +12,20 @@ from tongsim.type import ViewModeType
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from .other_util import (
-    fix_aabb_bounds,
+from utils.other_util import (
+    get_object_aabb,
     get_room_bbox,
     get_room_boundary,
     get_area,
     validate_table,
 )
 
-from .query_util import (
+from utils.query_util import (
     query_existing_objects_in_room,
     find_objects_near_table,
 )
 
-from .entity_util import (
+from utils.entity_util import (
     filter_objects_by_type,
 )
 
@@ -34,56 +34,51 @@ from .entity_util import (
 def measure_table_grid_boundaries(ue, table_object, grid_size=10.0, test_blueprint='BP_Ball_BaseBall_ver2', 
                                   test_duration=2.0, safety_margin=0.0, print_info=False):
     """
-    测量桌面的安全边界并划分为格子网格
+    [核心算法] 测量桌面有效区域，划分网格并标记边缘
     
-    通过在桌面上放置测试物体，从中心向外扩展，找出所有安全的格子位置
+    算法逻辑：
+    1. 以桌子几何中心为原点建立网格坐标系。
+    2. 使用广度优先搜索(BFS)从中心向外扩散测试。
+    3. 对每个格子进行物理仿真测试（放置小球看是否掉落）。
+    4. 收集所有"安全"（物体稳定）的格子。
+    5. 后处理：分析安全格子的邻居，标记出边缘格子。
     
     Args:
-        ue: TongSim实例
-        table_object: 桌子对象
-        grid_size: 格子大小（正方形边长），默认10.0
-        test_blueprint: 测试物体的蓝图，默认为棒球
-        test_duration: 测试等待时间（秒），默认2.0
-        safety_margin: 安全边距，格子边缘距离桌子边缘的最小距离
-        print_info: 是否打印详细信息
+        ue: TongSim仿真客户端实例
+        table_object: 目标桌子实体对象
+        grid_size: 网格单元大小（cm），默认10.0
+        test_blueprint: 用于测试稳定性的物体蓝图（默认棒球）
+        test_duration: 物理仿真等待时间（秒）
+        safety_margin: 几何边缘的安全边距（预留空间）
+        print_info: 是否打印调试日志
     
     Returns:
-        dict: {
-            'table_id': 桌子ID,
-            'grid_size': 格子大小,
-            'table_bounds': {'x_min', 'x_max', 'y_min', 'y_max', 'z_surface'},
-            'safe_grids': [{'id', 'x_min', 'x_max', 'y_min', 'y_max', 'center_x', 'center_y'}, ...],
-            'total_grids': 总格子数,
-            'timestamp': 时间戳
-        }
+        dict: 包含桌子信息、所有安全格子的坐标、边缘标记等数据的字典
     """
     
     if print_info:
         print(f"\n[INFO] 开始测量桌面边界，格子大小: {grid_size}")
     
-    # 1. 获取桌子的边界
-    table_aabb = table_object.get_world_aabb()
-    table_min, table_max = fix_aabb_bounds(table_aabb)
+    # 1. 获取桌子的AABB包围盒
+    table_min, table_max = get_object_aabb(table_object)
     
-    # 桌面参数
+    # 提取关键几何参数
     x_min, x_max = table_min.x, table_max.x
     y_min, y_max = table_min.y, table_max.y
-    table_surface_z = table_max.z
-    table_ground_z = table_min.z
+    table_surface_z = table_max.z  # 桌面高度
+    table_ground_z = table_min.z   # 地面高度（用于判断掉落）
     
     if print_info:
         print(f"[INFO] 桌子边界: X=[{x_min:.1f}, {x_max:.1f}], Y=[{y_min:.1f}, {y_max:.1f}], Z={table_surface_z:.1f}")
     
-    # 2. 计算桌子中心
+    # 2. 计算桌子几何中心，作为网格生成的原点
     center_x = (x_min + x_max) / 2
     center_y = (y_min + y_max) / 2
     
-    # 3. 计算从中心开始的网格坐标系
-    # 找到包含中心点的格子的索引
+    # 3. 初始化网格参数
     half_grid = grid_size / 2
     
-    # 计算网格的范围（以格子索引表示）
-    # 从中心向外扩展到边界
+    # 计算理论最大网格索引范围（从中心到最远边界的格子数）
     max_grids_x = int(math.ceil(max(abs(center_x - x_min), abs(x_max - center_x)) / grid_size)) + 1
     max_grids_y = int(math.ceil(max(abs(center_y - y_min), abs(y_max - center_y)) / grid_size)) + 1
     
@@ -91,14 +86,15 @@ def measure_table_grid_boundaries(ue, table_object, grid_size=10.0, test_bluepri
         print(f"[INFO] 网格范围: X=[-{max_grids_x}, {max_grids_x}], Y=[-{max_grids_y}, {max_grids_y}]")
     
     # 4. 使用BFS从中心向外扩展测试
-    tested_grids = {}  # 存储已测试的格子 {(grid_x, grid_y): is_safe}
-    safe_grids = []  # 存储安全的格子信息
+    # 策略：只有当前格子安全，才尝试探索其周围的格子，这样可以快速适应不规则形状的桌子
+    tested_grids = {}  # 记忆化存储：{(grid_x, grid_y): is_safe}
+    safe_grids = []    # 结果列表
     
-    # BFS队列，从中心格子开始
-    queue = deque([(0, 0)])  # (grid_x, grid_y)
-    tested_grids[(0, 0)] = None  # 标记为已加入队列
+    # BFS队列，起始点为中心(0,0)
+    queue = deque([(0, 0)]) 
+    tested_grids[(0, 0)] = None  # 标记为已入队，避免重复
     
-    # 方向：上下左右
+    # 搜索方向：上、下、左、右
     directions = [(0, 1), (0, -1), (1, 0), (-1, 0)]
     
     test_count = 0
@@ -107,28 +103,26 @@ def measure_table_grid_boundaries(ue, table_object, grid_size=10.0, test_bluepri
     while queue:
         grid_x, grid_y = queue.popleft()
         
-        # 计算当前格子的实际坐标
+        # 计算当前格子在世界坐标系中的中心点
         grid_center_x = center_x + grid_x * grid_size
         grid_center_y = center_y + grid_y * grid_size
         
-        # 计算格子的边界
+        # 计算当前格子的四角边界
         grid_x_min = grid_center_x - half_grid
         grid_x_max = grid_center_x + half_grid
         grid_y_min = grid_center_y - half_grid
         grid_y_max = grid_center_y + half_grid
-        if print_info:
-            print(f"格子范围[{grid_x_min}, {grid_x_max}], [{grid_y_min}, {grid_y_max}]")
         
-        # 检查格子是否完全在桌子范围内（考虑安全边距）
+        # 预检查：格子几何位置是否超出桌子AABB（包含安全边距）
         if (grid_x_min < x_min + safety_margin or grid_x_max > x_max - safety_margin or
             grid_y_min < y_min + safety_margin or grid_y_max > y_max - safety_margin):
-            # 格子超出桌子边界，标记为不安全
             tested_grids[(grid_x, grid_y)] = False
             if print_info:
-                print(f"[SKIP] 格子({grid_x}, {grid_y})超出桌子边界")
+                # print(f"[SKIP] 格子({grid_x}, {grid_y})超出桌子边界") # 减少日志输出
+                pass
             continue
         
-        # 测试当前格子
+        # 核心测试：在物理世界中放置物体验证稳定性
         is_safe = test_grid_safety(
             ue=ue,
             grid_center_x=grid_center_x,
@@ -145,11 +139,11 @@ def measure_table_grid_boundaries(ue, table_object, grid_size=10.0, test_bluepri
         
         if is_safe:
             safe_count += 1
-            # 记录安全格子
+            # 记录安全格子的详细信息
             grid_info = {
                 'id': safe_count,
-                'grid_x': grid_x,
-                'grid_y': grid_y,
+                'grid_x': grid_x,   # 相对中心的网格索引X
+                'grid_y': grid_y,   # 相对中心的网格索引Y
                 'x_min': float(grid_x_min),
                 'x_max': float(grid_x_max),
                 'y_min': float(grid_y_min),
@@ -163,19 +157,34 @@ def measure_table_grid_boundaries(ue, table_object, grid_size=10.0, test_bluepri
             if print_info:
                 print(f"[SAFE] 格子({grid_x}, {grid_y}) 安全 [已测试:{test_count}, 安全:{safe_count}]")
             
-            # 只有当前格子安全时，才将相邻格子加入队列
+            # 只有当前格子是安全的（即在桌面上），才继续向四周探索
             for dx, dy in directions:
                 next_grid = (grid_x + dx, grid_y + dy)
                 if next_grid not in tested_grids:
-                    # 检查是否超出最大范围
+                    # 限制搜索范围在AABB内，防止无限扩散
                     if abs(next_grid[0]) <= max_grids_x and abs(next_grid[1]) <= max_grids_y:
                         queue.append(next_grid)
-                        tested_grids[next_grid] = None  # 标记为已加入队列
+                        tested_grids[next_grid] = None
         else:
             if print_info:
                 print(f"[UNSAFE] 格子({grid_x}, {grid_y}) 不安全（物体掉落或移动）")
     
-    # 5. 整理结果
+    # 5. 后处理：边缘检测
+    # 逻辑：如果一个安全格子的四周存在"非安全"区域（空或测试失败），则该格子为边缘
+    safe_coords = set((g['grid_x'], g['grid_y']) for g in safe_grids)
+    
+    for grid in safe_grids:
+        gx, gy = grid['grid_x'], grid['grid_y']
+        is_edge = False
+        # 检查四个方向
+        for dx, dy in directions:
+            # 如果邻居不在安全集合中，说明当前格子紧邻边界
+            if (gx + dx, gy + dy) not in safe_coords:
+                is_edge = True
+                break
+        grid['is_edge'] = is_edge
+
+    # 6. 整理并返回最终数据结构
     result = {
         'table_id': str(table_object.id),
         'grid_size': float(grid_size),
@@ -206,27 +215,35 @@ def measure_table_grid_boundaries(ue, table_object, grid_size=10.0, test_bluepri
 def test_grid_safety(ue, grid_center_x, grid_center_y, table_surface_z, table_ground_z, 
                      test_blueprint, test_duration=2.0, movement_threshold=5.0, print_info=False):
     """
-    测试单个格子的安全性（物体是否会掉落或移动）
+    [物理仿真] 测试单个格子的稳定性
+    
+    原理：
+    在指定位置生成一个物理模拟对象（如小球），等待一段时间后检查其状态。
+    
+    判定不安全的条件：
+    1. 掉落：物体高度接近地面。
+    2. 滑动：物体水平位移超过阈值（说明桌面倾斜或有碰撞）。
+    3. 弹跳：物体垂直位置异常升高（说明物理碰撞异常）。
     
     Args:
         ue: TongSim实例
-        grid_center_x: 格子中心X坐标
-        grid_center_y: 格子中心Y坐标
-        table_surface_z: 桌面高度
-        table_ground_z: 桌子底部高度
+        grid_center_x: 测试点X坐标
+        grid_center_y: 测试点Y坐标
+        table_surface_z: 理论桌面高度
+        table_ground_z: 地面高度
         test_blueprint: 测试物体蓝图
-        test_duration: 测试持续时间（秒）
-        movement_threshold: 移动阈值，超过此距离视为不安全
-        print_info: 是否打印详细信息
+        test_duration: 物理稳定等待时间
+        movement_threshold: 允许的最大水平位移
+        print_info: 是否打印日志
     
     Returns:
-        bool: True表示安全，False表示不安全
+        bool: True(安全/稳定) / False(不安全/不稳定)
     """
     try:
-        # 在格子中心上方一点生成测试物体
+        # 在格子中心上方一点生成测试物体，避免直接穿模
         spawn_location = ts.Vector3(grid_center_x, grid_center_y, table_surface_z + 5.0)
         
-        # 生成测试物体
+        # 生成测试物体，开启物理模拟
         test_obj = ue.spawn_entity(
             entity_type=ts.BaseObjectEntity,
             blueprint=test_blueprint,
@@ -239,39 +256,39 @@ def test_grid_safety(ue, grid_center_x, grid_center_y, table_surface_z, table_gr
         # 记录初始位置
         initial_position = test_obj.get_location()
         
-        # 等待物理稳定
+        # 阻塞等待物理引擎计算
         time.sleep(test_duration)
         
         # 获取最终位置
         final_position = test_obj.get_location()
         
-        # 检查1: 物体是否掉落到地面
+        # 检查1: 掉落检测 (物体是否更接近地面而不是桌面)
         distance_to_ground = abs(final_position.z - table_ground_z)
         distance_to_surface = abs(final_position.z - table_surface_z)
         
         if distance_to_ground < distance_to_surface:
-            # 物体更接近地面，说明掉落了
+            # 物体掉落
             ue.destroy_entity(test_obj.id)
             return False
         
-        # 检查2: 物体在水平方向是否移动过多
+        # 检查2: 稳定性检测 (水平位移是否过大)
         horizontal_movement = math.sqrt(
             (final_position.x - initial_position.x) ** 2 +
             (final_position.y - initial_position.y) ** 2
         )
         
         if horizontal_movement > movement_threshold:
-            # 物体移动过多，说明位置不稳定
+            # 物体滑动或滚动
             ue.destroy_entity(test_obj.id)
             return False
         
-        # 检查3: 物体Z轴是否偏离桌面太多
+        # 检查3: 异常弹跳检测 (Z轴是否异常升高)
         z_deviation = abs(final_position.z - table_surface_z)
-        if z_deviation > 50.0:  # 超过50单位视为异常
+        if z_deviation > 50.0:  # 超过50单位视为被物理引擎"弹飞"
             ue.destroy_entity(test_obj.id)
             return False
         
-        # 清理测试物体
+        # 通过所有检查，清理并返回安全
         ue.destroy_entity(test_obj.id)
         
         return True
@@ -285,14 +302,22 @@ def test_grid_safety(ue, grid_center_x, grid_center_y, table_surface_z, table_gr
 def run_table_boundary_measurement(map_range=None, min_room_area=4, min_table_area=0.4, 
                                    grid_size=10.0, output_dir="./ownership/table_boundaries"):
     """
-    遍历所有地图的所有桌子，测量边界并划分格子
+    [主流程] 批量处理场景中的桌子，执行边界测量任务
+    
+    流程：
+    1. 加载目标场景列表。
+    2. 遍历每个场景(Map)和其中的房间(Room)。
+    3. 筛选符合条件的桌子(Table)。
+    4. 清理环境：移除桌上和附近的干扰物体。
+    5. 调用 measure_table_grid_boundaries 执行测量。
+    6. 将结果保存为JSON文件。
     
     Args:
-        map_range: 地图范围
-        min_room_area: 最小房间面积
-        min_table_area: 最小桌子面积
-        grid_size: 格子大小
-        output_dir: 输出目录
+        map_range: 要处理的地图编号范围
+        min_room_area: 最小房间面积过滤
+        min_table_area: 最小桌子面积过滤
+        grid_size: 网格大小
+        output_dir: 结果输出目录
     """
     
     # 读取筛选后的场景列表
