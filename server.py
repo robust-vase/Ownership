@@ -20,6 +20,11 @@ from core.ownership_manager import init_participant_file, save_participant_resul
 app = Flask(__name__)
 CORS(app)
 
+# Github 仓库
+GITHUB_USER = "robust-vase"  # 你的用户名
+REPO_NAME = "Ownership"      # 你的仓库名
+
+
 # ================= CRITICAL CONFIG =================
 # Secret Key loaded from config (environment variable or auto-generated)
 app.secret_key = config.SECRET_KEY
@@ -124,8 +129,10 @@ def index():
     image_name = get_first_image(scene_path) # 假设这个函数还在
     camera_id = parse_camera_id(image_name)
     camera_data = find_camera(scene_data, camera_id)
-    image_url = f"/scenes/{scene_name}/{image_name}"
-    
+    # image_url = f"/scenes/{scene_name}/{image_name}"
+
+    # Github 仓库
+    image_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{REPO_NAME}/main/swap/{scene_name}/{image_name}"
     # 注意：这里我们不再传 available_scenes 给前端选择，而是传进度
     html = generate_html_page(
         scene_data, camera_data, image_name, image_url,
