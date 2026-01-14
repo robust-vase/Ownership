@@ -8,8 +8,12 @@ import os
 import secrets
 
 # ==================== Paths ====================
-SCENES_ROOT_PATH = os.getenv('SCENES_ROOT', r"C:\Users\Vase\Desktop\result\swap")
-SCENES_ROOT = Path(SCENES_ROOT_PATH)
+# SCENES_ROOT_PATH = os.getenv('SCENES_ROOT', r"C:\Users\Vase\Desktop\result\swap")
+# SCENES_ROOT = Path(SCENES_ROOT_PATH)
+
+# Github 仓库
+BASE_DIR = Path(__file__).resolve().parent
+SCENES_ROOT = BASE_DIR / 'swap'
 
 # ==================== Server ====================
 SERVER_HOST = '0.0.0.0'
