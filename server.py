@@ -23,7 +23,7 @@ CORS(app)
 # Github 仓库
 GITHUB_USER = "robust-vase"  # 你的用户名
 REPO_NAME = "Ownership"      # 你的仓库名
-
+R2_BUCKET_URL = "https://pub-173f52ca79174a20a448405a46dd40e0.r2.dev"
 
 # ================= CRITICAL CONFIG =================
 # Secret Key loaded from config (environment variable or auto-generated)
@@ -131,8 +131,9 @@ def index():
     camera_data = find_camera(scene_data, camera_id)
     # image_url = f"/scenes/{scene_name}/{image_name}"
 
-    # Github 仓库
-    image_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{REPO_NAME}/main/swap/{scene_name}/{image_name}"
+    # 仓库
+    image_url = f"{R2_BUCKET_URL}/swap/{scene_name}/{image_name}"
+    
     # 注意：这里我们不再传 available_scenes 给前端选择，而是传进度
     html = generate_html_page(
         scene_data, camera_data, image_name, image_url,
@@ -220,3 +221,4 @@ if __name__ == '__main__':
     print(f"[INFO] Starting server on {config.SERVER_HOST}:{config.SERVER_PORT}")
     print(f"[INFO] Debug mode: {config.DEBUG_MODE}")
     app.run(host=config.SERVER_HOST, port=config.SERVER_PORT, debug=config.DEBUG_MODE)
+
