@@ -202,15 +202,10 @@ def index():
     
     # === 关键修改 ===
     # 获取该场景所属的 pool (例如 "1", "2")
-    pool_id = scene_info.get('pool', '')
+    pool_id = scene_info.get('pool', '1')
     
     # 构建 URL 时加入 pool_id
-    # 结果变成: /scenes/1/batch_8/TopCamera_rgb.png
-    if pool_id:
-        image_url = f"/scenes/{pool_id}/{scene_name}/{image_name}"
-    else:
-        # 兼容以前没有 Pool 的情况
-        image_url = f"/scenes/{scene_name}/{image_name}"
+    image_url = f"/scenes/{pool_id}/{scene_name}/{image_name}"
     # ===============
 
     html = generate_html_page(
@@ -326,8 +321,7 @@ def serve_guide_image(subpath):
 
 @app.route('/scenes/<path:filepath>')
 def serve_scene_file(filepath):
-    full_path = config.SCENES_ROOT / filepath
-    return send_from_directory(str(full_path.parent), full_path.name)
+    return send_from_directory(config.SCENES_ROOT, filepath)
 
 @app.route('/api/scenes')
 def list_scenes():
@@ -337,4 +331,5 @@ def list_scenes():
 if __name__ == '__main__':
     print(f"[INFO] Starting server on {config.SERVER_HOST}:{config.SERVER_PORT}")
     print(f"[INFO] Debug mode: {config.DEBUG_MODE}")
+
     app.run(host=config.SERVER_HOST, port=config.SERVER_PORT, debug=config.DEBUG_MODE)
