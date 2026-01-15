@@ -1,0 +1,187 @@
+{
+  "user_id": "20260115_184440_0322d7",
+  "start_time": "2026-01-15T18:44:40.186459",
+  "assigned_pool": "6",
+  "demographics": {
+    "gender": "Male",
+    "dob": "2026-01-02",
+    "status": "Student",
+    "education": "High School",
+    "nationality": "China (\u4e2d\u56fd)",
+    "ip_address": "10.1.121.196"
+  },
+  "scene_order": [
+    "batch_59",
+    "batch_51",
+    "batch_55",
+    "batch_52",
+    "swap_batch_9",
+    "swap_batch_8",
+    "swap_batch_2",
+    "swap_batch_10",
+    "swap_batch_1",
+    "batch_57",
+    "swap_batch_4",
+    "swap_batch_3",
+    "swap_batch_7",
+    "batch_54",
+    "batch_58",
+    "batch_53",
+    "swap_batch_6",
+    "swap_batch_5",
+    "batch_56",
+    "batch_60"
+  ],
+  "completed_scenes": [
+    "batch_59",
+    "batch_51",
+    "batch_55",
+    "batch_52",
+    "swap_batch_9",
+    "swap_batch_8",
+    "swap_batch_2",
+    "swap_batch_10",
+    "swap_batch_1",
+    "batch_57",
+    "swap_batch_4",
+    "swap_batch_3",
+    "swap_batch_7",
+    "batch_54",
+    "batch_58",
+    "batch_53",
+    "swap_batch_6",
+    "swap_batch_5",
+    "batch_56",
+    "batch_60"
+  ],
+  "experiments": [
+    {
+      "scene": "batch_59",
+      "save_timestamp": "2026-01-15T18:46:27.521348",
+      "duration_ms": 77008,
+      "results": []
+    },
+    {
+      "scene": "batch_51",
+      "save_timestamp": "2026-01-15T18:46:36.289779",
+      "duration_ms": 8696,
+      "results": []
+    },
+    {
+      "scene": "batch_55",
+      "save_timestamp": "2026-01-15T18:46:48.769309",
+      "duration_ms": 12396,
+      "results": []
+    },
+    {
+      "scene": "batch_52",
+      "save_timestamp": "2026-01-15T18:50:37.651856",
+      "duration_ms": 228803,
+      "results": [
+        {
+          "object_id": "BP_Food_186_C_2147320672",
+          "agent_left_id": "SDBP_Aich_AIBaby_Tiantian_90_C_2147320894",
+          "agent_right_id": "SDBP_Aich_Shenxin_C_2147320794",
+          "slider_value": 54
+        }
+      ]
+    },
+    {
+      "scene": "swap_batch_9",
+      "save_timestamp": "2026-01-15T18:51:11.409937",
+      "duration_ms": 33633,
+      "results": []
+    },
+    {
+      "scene": "swap_batch_8",
+      "save_timestamp": "2026-01-15T18:51:29.874862",
+      "duration_ms": 18380,
+      "results": []
+    },
+    {
+      "scene": "swap_batch_2",
+      "save_timestamp": "2026-01-15T18:51:40.381971",
+      "duration_ms": 10435,
+      "results": []
+    },
+    {
+      "scene": "swap_batch_10",
+      "save_timestamp": "2026-01-15T18:51:51.910463",
+      "duration_ms": 11451,
+      "results": []
+    },
+    {
+      "scene": "swap_batch_1",
+      "save_timestamp": "2026-01-15T18:52:01.375772",
+      "duration_ms": 9388,
+      "results": []
+    },
+    {
+      "scene": "batch_57",
+      "save_timestamp": "2026-01-15T18:52:11.509354",
+      "duration_ms": 10055,
+      "results": []
+    },
+    {
+      "scene": "swap_batch_4",
+      "save_timestamp": "2026-01-15T18:52:23.155623",
+      "duration_ms": 11569,
+      "results": []
+    },
+    {
+      "scene": "swap_batch_3",
+      "save_timestamp": "2026-01-15T18:52:37.264110",
+      "duration_ms": 14020,
+      "results": []
+    },
+    {
+      "scene": "swap_batch_7",
+      "save_timestamp": "2026-01-15T18:52:52.428307",
+      "duration_ms": 15077,
+      "results": []
+    },
+    {
+      "scene": "batch_54",
+      "save_timestamp": "2026-01-15T18:53:02.291741",
+      "duration_ms": 9784,
+      "results": []
+    },
+    {
+      "scene": "batch_58",
+      "save_timestamp": "2026-01-15T18:53:17.682006",
+      "duration_ms": 15303,
+      "results": []
+    },
+    {
+      "scene": "batch_53",
+      "save_timestamp": "2026-01-15T18:53:29.306115",
+      "duration_ms": 11545,
+      "results": []
+    },
+    {
+      "scene": "swap_batch_6",
+      "save_timestamp": "2026-01-15T18:53:41.599221",
+      "duration_ms": 12213,
+      "results": []
+    },
+    {
+      "scene": "swap_batch_5",
+      "save_timestamp": "2026-01-15T18:53:52.564779",
+      "duration_ms": 10889,
+      "results": []
+    },
+    {
+      "scene": "batch_56",
+      "save_timestamp": "2026-01-15T18:54:01.977524",
+      "duration_ms": 9331,
+      "results": []
+    },
+    {
+      "scene": "batch_60",
+      "save_timestamp": "2026-01-15T18:57:25.232155",
+      "duration_ms": 203192,
+      "results": []
+    }
+  ],
+  "is_fully_completed": true
+}
