@@ -496,6 +496,7 @@ if __name__ == '__main__':
     local_ip = get_local_ip()
     print(f"[INFO] Starting server on {config.SERVER_HOST}:{config.SERVER_PORT}")
     print(f"[INFO] Debug mode: {config.DEBUG_MODE}")
+<<<<<<< HEAD
     print(f"")
     print(f"  Local:   http://127.0.0.1:{config.SERVER_PORT}/")
     print(f"  Network: http://{local_ip}:{config.SERVER_PORT}/")
@@ -506,3 +507,7 @@ if __name__ == '__main__':
 
 
 
+=======
+
+    app.run(host=config.SERVER_HOST, port=config.SERVER_PORT, debug=config.DEBUG_MODE)
+>>>>>>> 722e69d631851caad23a3abbc5f93e481d4298ce
