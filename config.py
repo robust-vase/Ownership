@@ -8,14 +8,9 @@ import os
 import secrets
 
 # ==================== Paths ====================
-<<<<<<< HEAD
 # SCENES_ROOT_PATH = os.getenv('SCENES_ROOT', r"D:\tongsim-python\ownership\web_3\question_pool")
 # SCENES_ROOT = Path(SCENES_ROOT_PATH)
 
-=======
-
-# Github 仓库
->>>>>>> 722e69d631851caad23a3abbc5f93e481d4298ce
 BASE_DIR = Path(__file__).resolve().parent
 SCENES_ROOT = BASE_DIR / 'question_pool'
 
@@ -172,6 +167,5 @@ def get_scenes_in_pool(pool_id):
         if item.is_dir() and (item / SCENE_DATA_FILENAME).exists():
             scene_names.append(item.name)
     return scene_names
-
 
 
