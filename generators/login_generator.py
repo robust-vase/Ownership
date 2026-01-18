@@ -9,19 +9,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from static_assets.ui_components import render_common_css
+from core.translations import get_text, get_country_options
 
-def generate_login_html(error_message=None):
+def generate_login_html(error_message=None, lang='zh'):
     common_css = render_common_css()
     
-    # 国家列表 (按常用和字母排序)
-    countries = [
-        "China (中国)", "United States (美国)", "United Kingdom (英国)", 
-        "Australia (澳大利亚)", "Canada (加拿大)", "Germany (德国)", 
-        "France (法国)", "Japan (日本)", "South Korea (韩国)", 
-        "India (印度)", "Russia (俄罗斯)", "Brazil (巴西)",
-        "Other (其他)"
-    ]
-    country_options = "".join([f'<option value="{c}">{c}</option>' for c in countries])
+    # Build country options from translations
+    countries = get_country_options(lang)
+    country_options = "".join([f'<option value="{c["value"]}">{c["label"]}</option>' for c in countries])
+    
+    # Get translated text
+    t = lambda key: get_text(lang, f"login.{key}")
+    
+    # Determine the other language for switcher
+    other_lang = 'zh' if lang == 'en' else 'en'
+    switch_label = t('lang_switcher')
 
     login_css = """
         .login-container {
@@ -50,76 +52,97 @@ def generate_login_html(error_message=None):
         .error-msg { color: #e53e3e; background: #fff5f5; padding: 10px; border-radius: 6px; margin-bottom: 20px; text-align: center; }
         h2 { text-align: center; margin-bottom: 30px; color: #1a1a1a; }
         .hint { font-size: 12px; color: #666; margin-top: 4px; }
+        .lang-switcher {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 8px 16px;
+            background: rgba(255,255,255,0.9);
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+        .lang-switcher:hover {
+            background: #f0f0f0;
+            border-color: #ccc;
+        }
     """
 
     error_html = f'<div class="error-msg">{error_message}</div>' if error_message else ''
 
     return f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="{lang}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Participant Registration</title>
+    <title>{t('page_title')}</title>
     <style>
         {common_css}
         {login_css}
     </style>
 </head>
 <body>
+    <a href="/login?lang={other_lang}" class="lang-switcher">{switch_label}</a>
+    
     <div class="header">
-        <h1>🧠 Cognition Experiment</h1>
+        <h1>{t('header')}</h1>
     </div>
     
     <div class="login-container">
-        <h2>Participant Info</h2>
+        <h2>{t('form_title')}</h2>
         {error_html}
-        <form method="POST" action="/login">
+        <form method="POST" action="/login?lang={lang}">
+            <input type="hidden" name="language" value="{lang}">
             
             <div class="form-group">
-                <label class="form-label">Gender (性别)</label>
+                <label class="form-label">{t('gender')}</label>
                 <select name="gender" class="form-control" required>
-                    <option value="" disabled selected>Select...</option>
-                    <option value="Male">Male (男)</option>
-                    <option value="Female">Female (女)</option>
-                    </select>
+                    <option value="" disabled selected>{t('select_placeholder')}</option>
+                    <option value="Male">{t('gender_male')}</option>
+                    <option value="Female">{t('gender_female')}</option>
+                </select>
             </div>        
 
             <div class="form-group">
-                <label class="form-label">Date of Birth (出生年月)</label>
+                <label class="form-label">{t('dob')}</label>
                 <input type="date" name="dob" class="form-control" required>
             </div>
 
             <div class="form-group">
-                <label class="form-label">Current Status (身份)</label>
+                <label class="form-label">{t('status')}</label>
                 <select name="status" class="form-control" required>
-                    <option value="" disabled selected>Select...</option>
-                    <option value="Student">Student (在校学生)</option>
-                    <option value="Employed">Employed (在职人员)</option>
-                    <option value="Other">Other (其他)</option>
+                    <option value="" disabled selected>{t('select_placeholder')}</option>
+                    <option value="Student">{t('status_student')}</option>
+                    <option value="Employed">{t('status_employed')}</option>
+                    <option value="Other">{t('status_other')}</option>
                 </select>
             </div>
 
             <div class="form-group">
-                <label class="form-label">Education Level (最高学历)</label>
+                <label class="form-label">{t('education')}</label>
                 <select name="education" class="form-control" required>
-                    <option value="" disabled selected>Select...</option>
-                    <option value="High School">High School (高中/中专)</option>
-                    <option value="Bachelor">Bachelor (本科)</option>
-                    <option value="Master">Master (硕士)</option>
-                    <option value="PhD">PhD (博士)</option>
-                    <option value="Other">Other (其他)</option>
+                    <option value="" disabled selected>{t('select_placeholder')}</option>
+                    <option value="High School">{t('edu_high_school')}</option>
+                    <option value="Bachelor">{t('edu_bachelor')}</option>
+                    <option value="Master">{t('edu_master')}</option>
+                    <option value="PhD">{t('edu_phd')}</option>
+                    <option value="Other">{t('edu_other')}</option>
                 </select>
             </div>
 
             <div class="form-group">
-                <label class="form-label">Nationality (国籍)</label>
+                <label class="form-label">{t('nationality')}</label>
                 <select name="nationality" class="form-control" required>
-                    <option value="" disabled selected>Select...</option>
+                    <option value="" disabled selected>{t('select_placeholder')}</option>
                     {country_options}
                 </select>
             </div>
 
-            <button type="submit" class="btn-primary">Start Experiment</button>
+            <button type="submit" class="btn-primary">{t('submit_button')}</button>
         </form>
     </div>
 </body>

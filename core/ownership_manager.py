@@ -10,6 +10,7 @@ import sys
 import uuid
 import random
 import threading
+import statistics
 from pathlib import Path
 from datetime import datetime
 from contextlib import contextmanager
@@ -49,6 +50,9 @@ BLOCKED_FILE = DATA_ROOT / "blocked_users.json"
 GLOBAL_STATE_FILE = DATA_ROOT / "global_pool_state.json"
 
 POOL_STATUS_FILE = DATA_ROOT / "pool_status.json"
+
+# 每个池子的目标完成人数上限 (可通过环境变量覆盖)
+TARGET_COMPLETED_PER_POOL = int(os.getenv('TARGET_PER_POOL', 20))
 
 # ==================== Admin/Stats Functions ====================
 
@@ -99,11 +103,14 @@ def get_admin_stats():
     
     # 3. Config info
     scenes = config.scan_scenes(config.SCENES_ROOT)
+    available_pools = _detect_available_pools()
+    num_pools = len(available_pools)
     config_info = {
         "scenes_root": str(config.SCENES_ROOT),
         "total_scenes": len(scenes),
-        "scenes_per_pool": len(scenes) // 6 if scenes else 20,
-        "target_per_pool": 10  # 你可以在 config.py 中设置
+        "num_pools": num_pools,
+        "scenes_per_pool": len(scenes) // num_pools if scenes and num_pools > 0 else 20,
+        "target_per_pool": TARGET_COMPLETED_PER_POOL
     }
     
     return pool_status, participants[:50], config_info  # 最多返回50个最近的用户
@@ -111,24 +118,188 @@ def get_admin_stats():
 
 def reset_pool_status():
     """重置所有池子的计数（管理员用）"""
-    initial_status = {str(i): {"started": 0, "completed": 0} for i in range(1, 7)}
+    available_pools = _detect_available_pools()
+    initial_status = {pid: {"started": 0, "completed": 0} for pid in available_pools}
     with open(POOL_STATUS_FILE, 'w', encoding='utf-8') as f:
         json.dump(initial_status, f, indent=2)
+    # 同时重置全局索引
+    with open(GLOBAL_STATE_FILE, 'w', encoding='utf-8') as f:
+        json.dump({"last_pool_index": -1}, f, indent=2)
     return initial_status
+
+
+def get_participant_details(user_id):
+    """
+    获取单个参与者的详细数据。
+    
+    Args:
+        user_id: 用户ID字符串
+        
+    Returns:
+        Dict with user data including experiments and demographics,
+        or None if user not found.
+    """
+    file_path = DATA_ROOT / f"{user_id}.json"
+    
+    if not file_path.exists():
+        return None
+    
+    try:
+        with safe_file_access(file_path, 'r') as f:
+            if f:
+                data = json.load(f)
+                return {
+                    "user_id": data.get("user_id"),
+                    "start_time": data.get("start_time"),
+                    "assigned_pool": data.get("assigned_pool"),
+                    "demographics": data.get("demographics", {}),
+                    "experiments": data.get("experiments", []),
+                    "completed_scenes": data.get("completed_scenes", []),
+                    "total_scenes": len(data.get("scene_order", [])),
+                    "is_fully_completed": data.get("is_fully_completed", False)
+                }
+    except Exception as e:
+        print(f"Error reading participant {user_id}: {e}")
+        return None
+    
+    return None
+
+
+def get_pool_aggregate_stats(pool_id):
+    """
+    获取特定池子的聚合统计数据。
+    
+    Args:
+        pool_id: 池子ID字符串 (e.g., "1", "2")
+        
+    Returns:
+        Dict structure:
+        {
+            "scene_name_A": {
+                "object_1": {"mean": 55.2, "std_dev": 12.5, "n": 10},
+                "object_2": {"mean": 80.0, "std_dev": 8.3, "n": 10}
+            },
+            ...
+        }
+    """
+    pool_id = str(pool_id)
+    aggregated = {}  # scene_name -> object_id -> list of values
+    
+    # Iterate through all participant files
+    for user_file in DATA_ROOT.glob("*.json"):
+        if user_file.name in ["blocked_users.json", "global_pool_state.json", "pool_status.json"]:
+            continue
+            
+        try:
+            with open(user_file, 'r', encoding='utf-8') as f:
+                user_data = json.load(f)
+            
+            # Filter by pool
+            if user_data.get('assigned_pool') != pool_id:
+                continue
+            
+            # CRITICAL: Only count fully completed participants for statistics
+            if not user_data.get('is_fully_completed', False):
+                continue
+            
+            # Process experiments
+            for experiment in user_data.get('experiments', []):
+                scene_name = experiment.get('scene')
+                if not scene_name:
+                    continue
+                    
+                if scene_name not in aggregated:
+                    aggregated[scene_name] = {}
+                
+                for result in experiment.get('results', []):
+                    obj_id = result.get('object_id')
+                    slider_val = result.get('slider_value')
+                    
+                    if obj_id is None or slider_val is None:
+                        continue
+                    
+                    if obj_id not in aggregated[scene_name]:
+                        aggregated[scene_name][obj_id] = []
+                    
+                    aggregated[scene_name][obj_id].append(slider_val)
+                    
+        except Exception as e:
+            print(f"Error processing {user_file}: {e}")
+            continue
+    
+    # Calculate mean, std_dev, n for each object
+    result = {}
+    for scene_name, objects in aggregated.items():
+        result[scene_name] = {}
+        for obj_id, values in objects.items():
+            if values:
+                n = len(values)
+                mean_val = sum(values) / n
+                # Calculate standard deviation (sample std dev if n > 1)
+                if n > 1:
+                    std_dev = statistics.stdev(values)
+                else:
+                    std_dev = 0.0
+                result[scene_name][obj_id] = {
+                    "mean": round(mean_val, 2),
+                    "std_dev": round(std_dev, 2),
+                    "n": n
+                }
+    
+    return result
+
+
+def get_all_participant_files():
+    """
+    获取所有参与者JSON文件的路径列表（用于打包下载）。
+    
+    Returns:
+        List of Path objects for all participant JSON files.
+    """
+    files = []
+    for user_file in DATA_ROOT.glob("*.json"):
+        if user_file.name not in ["blocked_users.json", "global_pool_state.json", "pool_status.json"]:
+            files.append(user_file)
+    return files
 
 # ==================== Pool Status Functions ====================
 
+def _detect_available_pools():
+    """动态检测 question_pool 文件夹中有多少个池子"""
+    pool_ids = []
+    if config.SCENES_ROOT.exists():
+        for item in sorted(config.SCENES_ROOT.iterdir()):
+            if item.is_dir() and item.name.isdigit():
+                pool_ids.append(item.name)
+    return pool_ids if pool_ids else ["1"]  # 至少返回一个默认池子
+
+
 def _get_pool_status():
-    """读取池子状态，如果不存在则初始化 (1-6号池子)"""
+    """读取池子状态，如果不存在则根据实际池子数量初始化"""
+    available_pools = _detect_available_pools()
+    
     if not POOL_STATUS_FILE.exists():
-        # 初始化结构：每个池子都有 started 和 completed 计数
-        initial_status = {str(i): {"started": 0, "completed": 0} for i in range(1, 7)}
+        # 根据实际检测到的池子数量初始化
+        initial_status = {pid: {"started": 0, "completed": 0} for pid in available_pools}
         with safe_file_access(POOL_STATUS_FILE, 'w') as f:
             json.dump(initial_status, f, indent=2)
         return initial_status
-        
+    
     with safe_file_access(POOL_STATUS_FILE, 'r') as f:
-        return json.load(f)
+        existing_status = json.load(f)
+    
+    # 确保所有检测到的池子都在状态中
+    updated = False
+    for pid in available_pools:
+        if pid not in existing_status:
+            existing_status[pid] = {"started": 0, "completed": 0}
+            updated = True
+    
+    if updated:
+        with safe_file_access(POOL_STATUS_FILE, 'w') as f:
+            json.dump(existing_status, f, indent=2)
+    
+    return existing_status
 
 def _update_pool_status(pool_id, action="started"):
     """
@@ -148,39 +319,54 @@ def _update_pool_status(pool_id, action="started"):
 
 def assign_pool_strategy(user_id):
     """
-    [核心逻辑] 分配策略：优先分配‘完成数’最少的池子。
-    如果完成数一样，优先分配‘开始数’最少的（避免并发时拥挤）。
+    [核心逻辑] 严格轮询分配策略：
+    1. 动态检测可用池子数量
+    2. 使用全局计数器严格按顺序分配 (1 -> 2 -> 3 -> ... -> N -> 1)
+    3. 如果某个池子已达到完成上限，跳过它
     """
-    # 1. 获取当前状态
-    status = _get_pool_status() # {"1": {"started": 5, "completed": 3}, ...}
+    # 1. 获取当前状态和可用池子
+    status = _get_pool_status()  # {"1": {"started": 5, "completed": 3}, ...}
+    available_pools = sorted(status.keys(), key=int)  # ["1", "2", "3", ...]
+    num_pools = len(available_pools)
     
-    # 2. 转换为列表并排序
-    # 排序优先级：
-    #   1. completed (升序): 优先填补还没做完的空缺 (最重要！)
-    #   2. started (升序): 如果完成数一样，选当前正在做的人少的
-    pools = []
-    for pid, counts in status.items():
-        pools.append({
-            "id": pid,
-            "started": counts["started"],
-            "completed": counts["completed"]
-        })
+    if num_pools == 0:
+        raise Exception("No pools available in question_pool folder!")
     
-    # 为了避免总是分配给 ID 1，先随机打乱，再排序
-    random.shuffle(pools)
-    # 先按 started 排序 (次要条件)
-    pools.sort(key=lambda x: x['started'])
-    # 再按 completed 排序 (主要条件，Python sort 是稳定的)
-    pools.sort(key=lambda x: x['completed'])
+    # 2. 获取全局计数器 (上次分配的池子索引)
+    last_index = _get_global_pool_index()
     
-    # 3. 选中第一个（也就是完成数最少的那个）
-    best_pool = pools[0]['id']
+    # 3. 从上次位置开始，找下一个可用的池子
+    best_pool = None
+    attempts = 0
+    
+    while attempts < num_pools:
+        # 计算下一个池子索引 (严格轮询)
+        next_index = (last_index + 1) % num_pools
+        candidate_pool = available_pools[next_index]
+        
+        # 检查是否已达到完成上限
+        pool_completed = status.get(candidate_pool, {}).get("completed", 0)
+        
+        if pool_completed < TARGET_COMPLETED_PER_POOL:
+            # 这个池子还没满，选中它
+            best_pool = candidate_pool
+            _set_global_pool_index(next_index)  # 更新全局计数器
+            break
+        else:
+            # 这个池子满了，尝试下一个
+            last_index = next_index
+            attempts += 1
+    
+    # 如果所有池子都满了，使用完成数最少的那个（兜底逻辑）
+    if best_pool is None:
+        print(f"[WARNING] All pools have reached target ({TARGET_COMPLETED_PER_POOL}). Using least-filled pool.")
+        pools_sorted = sorted(status.items(), key=lambda x: x[1].get("completed", 0))
+        best_pool = pools_sorted[0][0]
     
     # 4. 更新该 Pool 的 started 计数
     _update_pool_status(best_pool, "started")
     
     # 5. 更新用户的 assigned_pool 字段并写入题目
-    import config # 延迟导入避免循环引用
     all_scenes_in_pool = config.get_scenes_in_pool(best_pool)
     random.shuffle(all_scenes_in_pool)
     
@@ -195,9 +381,31 @@ def assign_pool_strategy(user_id):
         f.seek(0)
         json.dump(user_data, f, indent=2, ensure_ascii=False)
         f.truncate()
-        
-    print(f"[ALLOCATION] User {user_id} assigned to Pool {best_pool} (Current Completes: {pools[0]['completed']})")
+    
+    pool_completed = status.get(best_pool, {}).get("completed", 0)
+    print(f"[ALLOCATION] User {user_id} assigned to Pool {best_pool} (Completed: {pool_completed}/{TARGET_COMPLETED_PER_POOL})")
     return best_pool
+
+
+def _get_global_pool_index():
+    """获取全局池子分配索引（上次分配的是哪个池子）"""
+    if not GLOBAL_STATE_FILE.exists():
+        return -1  # 初始值，第一次分配时 +1 = 0，即从第一个池子开始
+    
+    try:
+        with safe_file_access(GLOBAL_STATE_FILE, 'r') as f:
+            if f:
+                data = json.load(f)
+                return data.get("last_pool_index", -1)
+    except Exception:
+        pass
+    return -1
+
+
+def _set_global_pool_index(index):
+    """更新全局池子分配索引"""
+    with safe_file_access(GLOBAL_STATE_FILE, 'w') as f:
+        json.dump({"last_pool_index": index}, f, indent=2)
 
 def mark_user_completed(user_id):
     """
@@ -407,11 +615,18 @@ def save_participant_results(user_id, scene_name, items_data, duration_ms=None):
         # 记录数据
         formatted_results = []
         for item in items_data:
+            # CRITICAL: Ensure slider_value=50 (Unsure) is preserved as integer
+            raw_slider = item.get('slider_value')
+            if raw_slider is None:
+                slider_val = 50  # Default to 50 (Unsure) if missing
+            else:
+                slider_val = int(raw_slider)  # Ensure it's always an integer
+            
             record = {
                 "object_id": item.get('object_id'),
                 "agent_left_id": item.get('agent_a_id'),
                 "agent_right_id": item.get('agent_b_id'),
-                "slider_value": item.get('slider_value')
+                "slider_value": slider_val  # Always store as int, including 50
             }
             formatted_results.append(record)
         

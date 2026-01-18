@@ -12,15 +12,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.data_processor import process_scene_data
+from core.translations import get_text
 from static_assets.ui_components import render_common_css, render_left_panel_html, render_right_panel_html, render_core_script
 
-def generate_guide_html(ctx_1, ctx_2, ctx_3): # 接收三个场景
+def generate_guide_html(ctx_1, ctx_2, ctx_3, lang='en'): # 接收三个场景 + 语言
     """Entry point to generate the HTML."""
     
-    # 定义处理函数
+    # 定义处理函数 (with language support)
     def proc(ctx):
         if not ctx: return [], [], []
-        return process_scene_data(ctx['scene_data'], ctx['camera_data'], use_display_mapping=False, filter_empty_plates=False)
+        return process_scene_data(ctx['scene_data'], ctx['camera_data'], use_display_mapping=False, filter_empty_plates=False, lang=lang)
 
     # 处理数据
     obj1, agt1, lbl1 = proc(ctx_1)
@@ -32,16 +33,24 @@ def generate_guide_html(ctx_1, ctx_2, ctx_3): # 接收三个场景
     scene2_json = json.dumps({'objects': obj2, 'agents': agt2, 'agent_labels': lbl2, 'image_url': ctx_2['image_url']}, ensure_ascii=False)
     scene3_json = json.dumps({'objects': obj3, 'agents': agt3, 'agent_labels': lbl3, 'image_url': ctx_3['image_url']}, ensure_ascii=False)
 
-    return _build_tutorial_template(scene1_json, scene2_json, scene3_json)
+    return _build_tutorial_template(scene1_json, scene2_json, scene3_json, lang)
 
 
-def _build_tutorial_template(scene1_json, scene2_json, scene3_json):
+def _build_tutorial_template(scene1_json, scene2_json, scene3_json, lang='en'):
     common_css = render_common_css()
     
+    # Helper function for translations
+    t = lambda key: get_text(lang, f"tutorial.{key}")
+    
+    # Get translated panel headers
+    camera_view = get_text(lang, 'experiment.camera_view')
+    ownership_panel = get_text(lang, 'experiment.ownership_panel')
+    save_btn_text = t('save_button')
+    
     # 这里的 left_panel 内容会被 loadScene 动态替换，但 ID 必须正确
-    left_panel = """
+    left_panel = f"""
         <div class="panel" id="left-panel-wrapper">
-            <div class="panel-header">📷 Camera View</div>
+            <div class="panel-header">{camera_view}</div>
             <div class="image-container" id="imageContainer">
                 <img src="" alt="Camera View" class="camera-image" id="cameraImage">
                 <svg class="svg-overlay" id="svgOverlay"></svg>
@@ -50,9 +59,9 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json):
     """
     
     # 右侧面板结构
-    right_panel = """
+    right_panel = f"""
         <div class="panel" id="right-panel-wrapper">
-            <div class="panel-header">🎚️ Ownership Assignment</div>
+            <div class="panel-header">{ownership_panel}</div>
             <div class="matching-content" id="matching-content">
                 <div class="section">
                     <div class="section-title">Visible Objects</div>
@@ -60,13 +69,20 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json):
                 </div>
             </div>
             <div class="submit-section" id="submit-section">
-                <button class="submit-button" id="submit-btn" disabled>Save Assignments</button>
+                <button class="submit-button" id="submit-btn" disabled>{save_btn_text}</button>
             </div>
         </div>
     """
     
     # 初始化核心脚本（先给空数组，避免未定义错误）
-    core_script = render_core_script("[]", "[]", "[]", include_save_function=False)
+    # UI translations for core script
+    ui_translations = {
+        'ownership_question': get_text(lang, 'experiment.ownership_question'),
+        'slider_unsure': get_text(lang, 'experiment.slider_unsure'),
+        'confirm_button': get_text(lang, 'experiment.confirm_button'),
+        'locked_button': '已锁定' if lang == 'zh' else 'Locked'
+    }
+    core_script = render_core_script("[]", "[]", "[]", include_save_function=False, lang=lang, translations=ui_translations)
 
     # === 合并 CSS: Tutorial CSS + Focus Mode CSS ===
     tutorial_css = """
@@ -142,10 +158,72 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json):
         .quiz-error.active { display: block; }
     """
 
+    # Build translations object for JavaScript
+    i18n = {
+        'step1_badge': t('step1_badge'),
+        'step1_title': t('step1_title'),
+        'step1_content': t('step1_content'),
+        'step1_button': t('step1_button'),
+        'step2_badge': t('step2_badge'),
+        'step2_title': t('step2_title'),
+        'step2_content': t('step2_content'),
+        'step2_wrong_label': t('step2_wrong_label'),
+        'step2_wrong_hint': t('step2_wrong_hint'),
+        'step2_correct_label': t('step2_correct_label'),
+        'step2_correct_hint': t('step2_correct_hint'),
+        'step2_button': t('step2_button'),
+        'step3_badge': t('step3_badge'),
+        'step3_title': t('step3_title'),
+        'step3_content': t('step3_content'),
+        'next_button': t('next_button'),
+        'step4_tooltip_title': t('step4_tooltip_title'),
+        'step4_tooltip_content': t('step4_tooltip_content'),
+        'step5_badge': t('step5_badge'),
+        'step5_title': t('step5_title'),
+        'step5_content': t('step5_content'),
+        'step5_button': t('step5_button'),
+        'step6_tooltip_title': t('step6_tooltip_title'),
+        'step6_tooltip_content': t('step6_tooltip_content'),
+        'step7_badge': t('step7_badge'),
+        'step7_title': t('step7_title'),
+        'step7_content': t('step7_content'),
+        'step7_button': t('step7_button'),
+        'step8_badge': t('step8_badge'),
+        'step8_title': t('step8_title'),
+        'step8_intro': t('step8_intro'),
+        'step8_q1': t('step8_q1'),
+        'step8_q2': t('step8_q2'),
+        'step8_option_girl': t('step8_option_girl'),
+        'step8_option_boy': t('step8_option_boy'),
+        'step8_error': t('step8_error'),
+        'step8_button': t('step8_button'),
+        'step9_badge': t('step9_badge'),
+        'step9_title': t('step9_title'),
+        'step9_note': t('step9_note'),
+        'step9_content': t('step9_content'),
+        'step9_button': t('step9_button'),
+        'step10_badge': t('step10_badge'),
+        'step10_title': t('step10_title'),
+        'step10_content': t('step10_content'),
+        'step11_badge': t('step11_badge'),
+        'step11_title': t('step11_title'),
+        'step11_content': t('step11_content'),
+        'step11_button': t('step11_button'),
+        'step13_badge': t('step13_badge'),
+        'step13_title': t('step13_title'),
+        'step13_content': t('step13_content'),
+        'step13_button': t('step13_button'),
+        'step13_allocating': t('step13_allocating'),
+        'error_init': get_text(lang, 'errors.init_error'),
+        'error_network': get_text(lang, 'errors.network_error'),
+    }
+    i18n_json = json.dumps(i18n, ensure_ascii=False)
+
     tutorial_script = f"""
         const scene1Data = {scene1_json};
         const scene2Data = {scene2_json};
         const scene3Data = {scene3_json}; // Simulation Data
+        const i18n = {i18n_json}; // Translations
         
         let currentStep = 0;
         let currentSceneIndex = 1;
@@ -231,10 +309,10 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json):
             // --- Steps 1-8 (Keep as is, simplified for brevity here) ---
             if (step === 1) {{
                 backdrop.classList.add('active'); modal.classList.add('active');
-                stepBadge.textContent = 'Step 1 / 11'; // Update total count
-                stepTitle.innerHTML = 'Welcome';
-                stepContent.innerHTML = `<p class="modal-text">Welcome to the <strong>Ownership Cognition Experiment</strong>.<br>For the best experience, switch to full screen.</p>`;
-                nextBtn.textContent = 'Enter Fullscreen';
+                stepBadge.textContent = i18n.step1_badge;
+                stepTitle.innerHTML = i18n.step1_title;
+                stepContent.innerHTML = `<p class="modal-text">${{i18n.step1_content}}</p>`;
+                nextBtn.textContent = i18n.step1_button;
                 nextBtn.onclick = () => {{
                     if (document.documentElement.requestFullscreen) {{
                         document.documentElement.requestFullscreen().catch(e=>{{}});
@@ -243,24 +321,24 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json):
                 }};
             }} else if (step === 2) {{
                 backdrop.classList.add('active'); modal.classList.add('active');
-                stepBadge.textContent = 'Step 2 / 11';
-                stepTitle.innerHTML = 'Visual Judgment';
+                stepBadge.textContent = i18n.step2_badge;
+                stepTitle.innerHTML = i18n.step2_title;
                 stepContent.innerHTML = `
-                    <p class="modal-text">We focus on <strong>Psychological Ownership</strong> based on visual intuition.</p>
+                    <p class="modal-text">${{i18n.step2_content}}</p>
                     <div class="concept-comparison">
-                        <div class="concept-card wrong"><div>🚫</div><div>No External Clues</div><div style="font-size:12px;color:#888">Don't guess who bought it</div></div>
-                        <div class="concept-card correct"><div>👓</div><div>Visual Intuition</div><div style="font-size:12px;color:#888">Judge based on the image</div></div>
+                        <div class="concept-card wrong"><div>🚫</div><div>${{i18n.step2_wrong_label}}</div><div style="font-size:12px;color:#888">${{i18n.step2_wrong_hint}}</div></div>
+                        <div class="concept-card correct"><div>👓</div><div>${{i18n.step2_correct_label}}</div><div style="font-size:12px;color:#888">${{i18n.step2_correct_hint}}</div></div>
                     </div>
                 `;
-                nextBtn.textContent = 'I Understand';
+                nextBtn.textContent = i18n.step2_button;
                 nextBtn.onclick = () => showStep(3);
             }} else if (step === 3) {{
                 document.body.classList.add('left-panel-visible', 'step-3');
                 backdrop.classList.add('active'); modal.classList.add('active');
-                stepBadge.textContent = 'Step 3 / 11';
-                stepTitle.innerHTML = 'Scene Explanation';
-                stepContent.innerHTML = `<p class="modal-text">In this scene, you see <strong>Two People</strong> and <strong>Objects</strong> on the table.</p><p class="modal-text">Task: Judge who owns each object.</p>`;
-                nextBtn.textContent = 'Next';
+                stepBadge.textContent = i18n.step3_badge;
+                stepTitle.innerHTML = i18n.step3_title;
+                stepContent.innerHTML = i18n.step3_content;
+                nextBtn.textContent = i18n.next_button;
                 nextBtn.onclick = () => showStep(4);
             }} else if (step === 4) {{
                 document.body.classList.add('left-panel-visible', 'spotlight-mode', 'step-4');
@@ -268,26 +346,14 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json):
                 tooltip.classList.add('active');
                 positionTooltipForStep4();
 
-                tooltip.innerHTML = `
-                    <h3>Control Panel Guide</h3>
-                    <p>The slider represents the <strong>probability</strong> of ownership.</p>
-                    <ul style="line-height: 1.6;">
-                        <li>← <strong>Closer to Left</strong>: Higher probability it belongs to the <strong>Left Person</strong>.</li>
-                        <li>→ <strong>Closer to Right</strong>: Higher probability it belongs to the <strong>Right Person</strong>.</li>
-                        <li><strong>Middle</strong>: Unsure, Ambiguous, or Shared.</li>
-                    </ul>
-                    <p style="margin-top:10px; font-size: 13px; color: #666;">
-                        <em>(The further you drag, the more certain you are.)</em>
-                    </p>
-                    <p><strong>Action: Drag the slider to indicate your confidence, then click "Confirm".</strong></p>
-                `;
+                tooltip.innerHTML = `<h3>${{i18n.step4_tooltip_title}}</h3>${{i18n.step4_tooltip_content}}`;
 
             }} else if (step === 5) {{
                 backdrop.classList.add('active'); modal.classList.add('active');
-                stepBadge.textContent = 'Step 5 / 11';
-                stepTitle.innerHTML = 'Complete All';
-                stepContent.innerHTML = `<p class="modal-text">Assign ownership for <strong>ALL remaining objects</strong>.</p>`;
-                nextBtn.textContent = 'OK';
+                stepBadge.textContent = i18n.step5_badge;
+                stepTitle.innerHTML = i18n.step5_title;
+                stepContent.innerHTML = i18n.step5_content;
+                nextBtn.textContent = i18n.step5_button;
                 nextBtn.onclick = () => {{
                     modal.classList.remove('active'); backdrop.classList.remove('active');
                     document.body.classList.add('left-panel-visible', 'step-5');
@@ -297,33 +363,33 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json):
                 backdrop.classList.add('active');
                 tooltip.classList.add('active');
                 positionTooltipForStep6();
-                tooltip.innerHTML = `<h3>Proceed</h3><p>Click <strong>Save Assignments</strong>.</p>`;
+                tooltip.innerHTML = `<h3>${{i18n.step6_tooltip_title}}</h3><p>${{i18n.step6_tooltip_content}}</p>`;
             }} else if (step === 7) {{
                 tooltip.classList.remove('active');
                 backdrop.classList.add('active'); modal.classList.add('active');
-                stepBadge.textContent = 'Step 7 / 11';
-                stepTitle.innerHTML = 'Practice Test';
-                stepContent.innerHTML = `<p class="modal-text">Now, a <strong>check scene</strong>. Rely on intuition.</p>`;
-                nextBtn.textContent = 'Start Test';
+                stepBadge.textContent = i18n.step7_badge;
+                stepTitle.innerHTML = i18n.step7_title;
+                stepContent.innerHTML = i18n.step7_content;
+                nextBtn.textContent = i18n.step7_button;
                 nextBtn.onclick = () => {{ loadScene(2); showStep(8); }};
             }} else if (step === 8) {{
                 document.body.classList.add('left-panel-visible', 'step-8-modal', 'spotlight-mode');
                 backdrop.classList.add('active'); modal.classList.add('active');
-                stepBadge.textContent = 'Step 8 / 11';
-                stepTitle.innerHTML = 'Practice Scene';
+                stepBadge.textContent = i18n.step8_badge;
+                stepTitle.innerHTML = i18n.step8_title;
                 stepContent.innerHTML = `
-                    <p class="modal-text">Quick Check:</p>
+                    <p class="modal-text">${{i18n.step8_intro}}</p>
                     <div class="quiz-section">
-                        <div class="quiz-question">1. Who took the green dinosaur toy?</div>
-                        <div class="quiz-options"><button class="quiz-option" data-q="q1" data-a="girl">Girl</button><button class="quiz-option" data-q="q1" data-a="boy">Boy</button></div>
-                        <div class="quiz-error" id="q1-error">✗ Incorrect</div>
+                        <div class="quiz-question">${{i18n.step8_q1}}</div>
+                        <div class="quiz-options"><button class="quiz-option" data-q="q1" data-a="girl">${{i18n.step8_option_girl}}</button><button class="quiz-option" data-q="q1" data-a="boy">${{i18n.step8_option_boy}}</button></div>
+                        <div class="quiz-error" id="q1-error">${{i18n.step8_error}}</div>
                     </div>
                     <div class="quiz-section">
-                        <div class="quiz-question">2. Pink pig doll closer to?</div>
-                        <div class="quiz-options"><button class="quiz-option" data-q="q2" data-a="girl">Girl</button><button class="quiz-option" data-q="q2" data-a="boy">Boy</button></div>
-                        <div class="quiz-error" id="q2-error">✗ Incorrect</div>
+                        <div class="quiz-question">${{i18n.step8_q2}}</div>
+                        <div class="quiz-options"><button class="quiz-option" data-q="q2" data-a="girl">${{i18n.step8_option_girl}}</button><button class="quiz-option" data-q="q2" data-a="boy">${{i18n.step8_option_boy}}</button></div>
+                        <div class="quiz-error" id="q2-error">${{i18n.step8_error}}</div>
                     </div>`;
-                nextBtn.textContent = 'Start'; nextBtn.disabled = true;
+                nextBtn.textContent = i18n.step8_button; nextBtn.disabled = true;
                 
                 const correct = {{ q1: 'boy', q2: 'girl' }};
                 const user = {{}};
@@ -345,10 +411,10 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json):
             // === UPDATED: Step 9 (Disclaimer) ===
             }} else if (step === 9) {{
                 backdrop.classList.add('active'); modal.classList.add('active');
-                stepBadge.textContent = 'Step 9 / 11';
-                stepTitle.innerHTML = 'Disclaimer';
-                stepContent.innerHTML = `<div style="background:#fff3cd;padding:15px;border-radius:8px;margin-bottom:15px"><strong>Note:</strong> There are no right or wrong answers. Rely on first intuition.</div><p class="modal-text">No moral judgment involved. Ignore external characteristics.</p>`;
-                nextBtn.textContent = 'Next: Simulation';
+                stepBadge.textContent = i18n.step9_badge;
+                stepTitle.innerHTML = i18n.step9_title;
+                stepContent.innerHTML = `<div style="background:#fff3cd;padding:15px;border-radius:8px;margin-bottom:15px">${{i18n.step9_note}}</div>${{i18n.step9_content}}`;
+                nextBtn.textContent = i18n.step9_button;
                 nextBtn.onclick = () => {{ showStep(11); }}; // Jump to Simulation Intro
             
             // === UPDATED: Step 10 (Fail) ===
@@ -356,30 +422,20 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json):
                 if(document.exitFullscreen) document.exitFullscreen().catch(e=>{{}}); // Exit Fullscreen
                 fetch('/fail_screening', {{ method: 'POST' }});
                 backdrop.classList.add('active'); modal.classList.add('active');
-                stepBadge.textContent = 'Session Ended';
+                stepBadge.textContent = i18n.step10_badge;
                 stepBadge.style.background = '#ff6b6b';
-                stepTitle.innerHTML = 'Thank You';
-                stepContent.innerHTML = `<p class="modal-text">Based on your responses, your visual interpretation differs significantly from the baseline required.</p><p class="modal-text">You may close this window.</p>`;
+                stepTitle.innerHTML = i18n.step10_title;
+                stepContent.innerHTML = i18n.step10_content;
                 nextBtn.style.display = 'none';
                 
             // === NEW: Step 11 (Simulation Intro) ===
             }} else if (step === 11) {{
                 backdrop.classList.add('active'); modal.classList.add('active');
                 document.querySelector('.container').style.opacity = '0.1'; 
-                stepBadge.textContent = 'Step 10 / 11';
-                stepTitle.innerHTML = 'Workflow Simulation';
-                stepContent.innerHTML = `
-                    <p class="modal-text">We will now simulate the <strong>Real Experiment Workflow</strong>.</p>
-                    <p class="modal-text"><strong>Your Task:</strong></p>
-                    <ol style="margin-bottom:20px; line-height:1.6; padding-left:20px;">
-                        <li><strong>Observation (5s):</strong> The image will be shown in full size. Please observe the people and objects carefully.</li>
-                        <li><strong>Annotation:</strong> Assign ownership for the items on the table.</li>
-                    </ol>
-                    <div style="font-size:13px; color:#666; background:#f5f5f5; padding:10px; border-radius:6px;">
-                        <em>* This is a practice run. Data will not be recorded.</em>
-                    </div>
-                `;
-                nextBtn.textContent = 'Start Simulation';
+                stepBadge.textContent = i18n.step11_badge;
+                stepTitle.innerHTML = i18n.step11_title;
+                stepContent.innerHTML = i18n.step11_content;
+                nextBtn.textContent = i18n.step11_button;
                 nextBtn.onclick = () => {{
                      document.querySelector('.container').style.opacity = '1';
                      loadScene(3); 
@@ -400,24 +456,17 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json):
             // === NEW: Step 13 (Final Ready) ===
             }} else if (step === 13) {{
                 backdrop.classList.add('active'); modal.classList.add('active');
-                stepBadge.textContent = 'Step 11 / 11';
-                stepTitle.innerHTML = 'Ready for Experiment';
-                stepContent.innerHTML = `
-                    <div style="text-align:center; margin-bottom:20px;">
-                        <span style="font-size:40px;">🚀</span>
-                    </div>
-                    <p class="modal-text">You have completed the tutorial.</p>
-                    <p class="modal-text">There are approximately <strong>20 scenes</strong> in the main experiment.</p>
-                    <p class="modal-text">Please maintain the same level of attention. Thank you!</p>
-                `;
-                nextBtn.textContent = 'Start Main Experiment';
+                stepBadge.textContent = i18n.step13_badge;
+                stepTitle.innerHTML = i18n.step13_title;
+                stepContent.innerHTML = i18n.step13_content;
+                nextBtn.textContent = i18n.step13_button;
                 nextBtn.classList.remove('tutorial-btn-primary');
                 nextBtn.style.background = '#000';
                 nextBtn.style.color = '#fff';
                 
                 nextBtn.onclick = () => {{
                     nextBtn.disabled = true;
-                    nextBtn.textContent = 'Allocating Scenes...';
+                    nextBtn.textContent = i18n.step13_allocating;
                     
                     fetch('/api/start_main_experiment', {{ method: 'POST' }})
                     .then(res => res.json())
@@ -425,15 +474,15 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json):
                         if(data.status === 'success') {{
                             window.location.href = '/'; 
                         }} else {{
-                            alert('Error initializing experiment: ' + (data.error || 'Unknown error'));
+                            alert(i18n.error_init + ': ' + (data.error || 'Unknown error'));
                             nextBtn.disabled = false;
-                            nextBtn.textContent = 'Start Main Experiment';
+                            nextBtn.textContent = i18n.step13_button;
                         }}
                     }})
                     .catch(err => {{
-                        alert('Network Error');
+                        alert(i18n.error_network);
                         nextBtn.disabled = false;
-                        nextBtn.textContent = 'Start Main Experiment';
+                        nextBtn.textContent = i18n.step13_button;
                     }});
                 }};
             }}
@@ -512,12 +561,20 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json):
         }});
     """
     
+    # Get page-level translations
+    page_title = t('page_title')
+    header_title = t('header')
+    mode_badge = t('mode_badge')
+    step1_badge_init = t('step1_badge')
+    step1_title_init = t('step1_title')
+    next_button_init = t('next_button')
+    
     return f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="{lang}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tutorial - Ownership Tool</title>
+    <title>{page_title}</title>
     <style>
         {common_css}
         {tutorial_css}
@@ -527,19 +584,19 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json):
     <div id="tutorial-backdrop" class="active"></div>
     <div id="tutorial-modal" class="active">
         <div class="modal-header">
-            <div class="modal-step-badge" id="step-badge">Step 1 / 11</div>
-            <h2 class="modal-title" id="step-title">Welcome</h2>
+            <div class="modal-step-badge" id="step-badge">{step1_badge_init}</div>
+            <h2 class="modal-title" id="step-title">{step1_title_init}</h2>
         </div>
         <div class="modal-content" id="step-content">Loading...</div>
         <div class="modal-actions">
-            <button class="tutorial-btn tutorial-btn-primary" id="next-btn">Next</button>
+            <button class="tutorial-btn tutorial-btn-primary" id="next-btn">{next_button_init}</button>
         </div>
     </div>
     <div id="tutorial-tooltip" class="tutorial-tooltip"></div>
 
     <div class="header">
-        <h1>Object Ownership Tool</h1>
-        <div class="tutorial-badge">🎓 Tutorial Mode</div>
+        <h1>{header_title}</h1>
+        <div class="tutorial-badge">{mode_badge}</div>
     </div>
     
     <div class="container">

@@ -463,7 +463,7 @@ def render_common_css():
     """
 
 
-def render_left_panel_html(image_url):
+def render_left_panel_html(image_url, panel_header="📷 Camera View"):
     """
     Generate Left Panel HTML (Camera View).
     Added ID 'left-panel-wrapper' for focus mode control.
@@ -471,7 +471,7 @@ def render_left_panel_html(image_url):
     return f"""
         <div class="panel" id="left-panel-wrapper">
             <div class="panel-header">
-                <span>📷</span> Camera View
+                {panel_header}
             </div>
             <div class="image-container" id="imageContainer">
                 <img src="{image_url}" alt="Camera View" class="camera-image" id="cameraImage">
@@ -481,7 +481,7 @@ def render_left_panel_html(image_url):
     """
 
 
-def render_right_panel_html(submit_button_text="Save Assignments", submit_onclick="saveOwnerships()"):
+def render_right_panel_html(submit_button_text="Save Assignments", submit_onclick="saveOwnerships()", panel_header="🎚️ Ownership Assignment"):
     """
     Generate Right Panel HTML (Object List).
     Added ID 'right-panel-wrapper' for focus mode control.
@@ -489,7 +489,7 @@ def render_right_panel_html(submit_button_text="Save Assignments", submit_onclic
     return f"""
         <div class="panel" id="right-panel-wrapper">
             <div class="panel-header">
-                <span>📝</span> Ownership Assignment
+                {panel_header}
             </div>
             <div class="matching-content">
                 <div class="section">
@@ -508,26 +508,82 @@ def render_right_panel_html(submit_button_text="Save Assignments", submit_onclic
     """
 
 
-def render_core_script(objects_json, agents_json, agent_labels_json, include_save_function=True):
+def render_core_script(objects_json, agents_json, agent_labels_json, include_save_function=True, lang='en', translations=None):
     """
     Generate core JavaScript.
+    REFACTORED: Removed window.addEventListener('load') dependency for DOM swapping support.
+    
+    Args:
+        objects_json: JSON string of objects data
+        agents_json: JSON string of agents data
+        agent_labels_json: JSON string of agent labels
+        include_save_function: Whether to include the save function
+        lang: Language code ('en' or 'zh')
+        translations: Dict with translated strings (ownership_question, slider_unsure, confirm_button)
     """
+    # Default translations
+    if translations is None:
+        translations = {
+            'ownership_question': 'Who do you think this is more likely to belong to?' if lang == 'en' else '你认为这个物品更可能属于谁？',
+            'slider_unsure': 'Unsure' if lang == 'en' else '不确定',
+            'confirm_button': 'Confirm' if lang == 'en' else '确认',
+            'locked_button': 'Locked' if lang == 'en' else '已锁定'
+        }
+    
+    ownership_question = translations.get('ownership_question', 'Who do you think this is more likely to belong to?')
+    slider_unsure = translations.get('slider_unsure', 'Unsure')
+    confirm_text = translations.get('confirm_button', 'Confirm')
+    locked_text = translations.get('locked_button', 'Locked')
+    
     save_function = """
-            
         function saveOwnerships() {
             const btn = document.querySelector('.submit-button');
             btn.textContent = 'Saving...';
             btn.disabled = true;
             
-            // 计算耗时
             const duration = (typeof startTime !== 'undefined') ? (Date.now() - startTime) : 0;
+            const currentIdx = (typeof window.currentSceneIdx !== 'undefined') ? window.currentSceneIdx : 1;
             
             const payload = {
                 scene: typeof currentScene !== 'undefined' ? currentScene : 'unknown',
-                duration_ms: duration, // 发送耗时
-                timestamp: Date.now(), // 点击保存的时间点
-                annotations: []
+                duration_ms: duration,
+                timestamp: Date.now(),
+                annotations: [],
+                attention_failed: false
             };
+            
+            // Validate Attention Checks
+            let attentionFailed = false;
+            for (const [objId, data] of Object.entries(ownerships)) {
+                if (confirmations[objId] && objId.startsWith('attention_check_')) {
+                    const val = data.confidence;
+                    const checkMeta = window.attentionCheckMeta ? window.attentionCheckMeta[objId] : null;
+                    if (checkMeta) {
+                        let passed = false;
+                        if (checkMeta.target === 'left_0') passed = val < 5;
+                        else if (checkMeta.target === 'right_100') passed = val > 95;
+                        else if (checkMeta.target === 'gt_75') passed = val > 75;
+                        else if (checkMeta.target === 'lt_25') passed = val < 25;
+                        
+                        if (!passed) {
+                            attentionFailed = true;
+                            if (currentIdx <= 20) {
+                                fetch('/save_ownerships', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ status: 'failed_attention', scene: payload.scene })
+                                }).then(res => res.json()).then(data => {
+                                    if (data.action === 'redirect') window.location.href = data.url;
+                                });
+                                return;
+                            } else {
+                                alert('Please pay attention to the instructions!');
+                                payload.attention_failed = true;
+                            }
+                        }
+                    }
+                }
+            }
 
             for (const [objId, data] of Object.entries(ownerships)) {
                 if (confirmations[objId]) {
@@ -550,19 +606,33 @@ def render_core_script(objects_json, agents_json, agent_labels_json, include_sav
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
-                    // ★ 修改这里：如果服务器要求 reload，则刷新页面
                     if (data.action === 'reload') {
                         btn.textContent = 'Saved! Loading next...';
-                        window.location.reload(); // 刷新 -> 服务器路由 index() -> 发送下一个场景
-                    } else {
-                        // 原有的逻辑
-                        const statusMsg = document.getElementById('statusMessage');
-                        statusMsg.textContent = 'Saved successfully!';
-                        statusMsg.className = 'status-message success';
-                        statusMsg.style.display = 'block';
+                        
+                        fetch('/', { method: 'GET', credentials: 'same-origin' })
+                            .then(res => res.text())
+                            .then(html => {
+                                const parser = new DOMParser();
+                                const newDoc = parser.parseFromString(html, 'text/html');
+                                
+                                document.head.innerHTML = newDoc.head.innerHTML;
+                                document.body.innerHTML = newDoc.body.innerHTML;
+                                document.body.className = newDoc.body.className;
+                                
+                                // Re-execute scripts
+                                const scripts = newDoc.querySelectorAll('script');
+                                scripts.forEach(oldScript => {
+                                    const newScript = document.createElement('script');
+                                    newScript.textContent = oldScript.textContent; 
+                                    document.body.appendChild(newScript);
+                                });
+                            })
+                            .catch(err => {
+                                console.error('DOM swap failed:', err);
+                                window.location.reload();
+                            });
                     }
                 } else {
-                    // Error handling...
                     btn.disabled = false;
                     btn.textContent = 'Save & Next';
                     alert('Error saving: ' + data.error);
@@ -574,24 +644,27 @@ def render_core_script(objects_json, agents_json, agent_labels_json, include_sav
                 alert('Network Error');
             });
         }
-
     """ if include_save_function else ""
     
     return f"""
-        const objects = {objects_json};
-        const agents = {agents_json};
-        const agentLabels = {agent_labels_json};
-        const ownerships = {{}};
-        const confirmations = {{}};
+        // DATA INITIALIZATION
+        // Note: Using var or assigning to window ensures variables persist/update correctly during swaps
+        window.objects = {objects_json};
+        window.agents = {agents_json};
+        window.agentLabels = {agent_labels_json};
+        window.ownerships = {{}};
+        window.confirmations = {{}};
         
-        let agentA = agents[0] || {{ id: 'unknown', display_name: 'agent_a', color: '#000000' }};
-        let agentB = agents[1] || {{ id: 'unknown', display_name: 'agent_b', color: '#000000' }};
+        window.agentA = window.agents[0] || {{ id: 'unknown', display_name: 'agent_a', color: '#000000' }};
+        window.agentB = window.agents[1] || {{ id: 'unknown', display_name: 'agent_b', color: '#000000' }};
         
-        window.addEventListener('load', () => {{
+        // --- CORE INITIALIZATION FUNCTION ---
+        // This function will be called by page_generators.py immediately
+        window.initSceneVisuals = function() {{
             renderVisuals();
             populateObjectList();
             adjustSVGSize();
-        }});
+        }};
         
         window.addEventListener('resize', adjustSVGSize);
         
@@ -608,12 +681,12 @@ def render_core_script(objects_json, agents_json, agent_labels_json, include_sav
         }}
         
         function renderVisuals() {{
+            // ... (Inside content remains exactly the same as before) ...
             const svg = document.getElementById('svgOverlay');
             if(!svg) return;
             svg.innerHTML = '';
             
-            // Agents Hulls
-            agents.forEach(agent => {{
+            window.agents.forEach(agent => {{
                 if (agent.hull && agent.hull.length >= 3) {{
                     const hull = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
                     const points = agent.hull.map(p => `${{p[0]}},${{p[1]}}`).join(' ');
@@ -625,15 +698,13 @@ def render_core_script(objects_json, agents_json, agent_labels_json, include_sav
                 }}
             }});
             
-            // Objects
-            objects.forEach(obj => {{
+            window.objects.forEach(obj => {{
+                if (obj.is_attention_check) return;
                 const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
                 const points = obj.polygon.map(p => `${{p[0]}},${{p[1]}}`).join(' ');
                 polygon.setAttribute('points', points);
                 polygon.setAttribute('class', 'object-polygon');
                 polygon.setAttribute('data-id', obj.id);
-                
-                // Add dim mode logic here
                 polygon.addEventListener('mouseenter', () => {{ 
                     highlightObject(obj.id, true);
                     enableDimMode(obj.id);
@@ -643,12 +714,10 @@ def render_core_script(objects_json, agents_json, agent_labels_json, include_sav
                     disableDimMode();
                 }});
                 polygon.addEventListener('click', () => scrollToObject(obj.id));
-                
                 svg.appendChild(polygon);
             }});
             
-            // Agent Labels
-            agentLabels.forEach(agent => {{
+            window.agentLabels.forEach(agent => {{
                 const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                 text.setAttribute('x', agent.x);
                 text.setAttribute('y', agent.y);
@@ -659,43 +728,58 @@ def render_core_script(objects_json, agents_json, agent_labels_json, include_sav
         }}
         
         function populateObjectList() {{
+            // ... (Inside content remains exactly the same as before, just change objects to window.objects) ...
             const list = document.getElementById('objectList');
             if(!list) return;
             list.innerHTML = '';
             
-            objects.forEach(obj => {{
+            window.objects.forEach(obj => {{
+                // ... (Keep existing item creation logic) ...
+                // COPY ALL YOUR EXISTING populateObjectList CODE HERE
+                // BUT MAKE SURE TO USE window.ownerships, window.agentA, etc.
+                // ---------------------------------------------------------
+                // Simulating the content for brevity in this answer, 
+                // BUT YOU SHOULD KEEP THE FULL LOGIC from your previous file.
+                // Just ensuring 'const objects' is accessed via 'window.objects' inside here
+                
                 const item = document.createElement('div');
                 item.className = 'object-item';
                 item.setAttribute('data-id', obj.id);
-                
-                // Header Row (Flex)
+
+                // ... (Create Header) ...
                 const headerRow = document.createElement('div');
                 headerRow.className = 'object-header-row';
-                
                 const name = document.createElement('div');
                 name.className = 'object-name';
-                const objLabel = (obj.display_name || obj.label || obj.id || '').toString();
-                name.textContent = objLabel;
+                name.textContent = (obj.display_name || obj.label || obj.id || '').toString();
                 
-                // Question Inline
                 const questionSpan = document.createElement('span');
                 questionSpan.className = 'object-question-inline';
-                questionSpan.textContent = `Who do you think the ${{objLabel}} is more likely to belong to?`;
+                if (obj.is_attention_check && obj.question) {{
+                    questionSpan.textContent = obj.question;
+                }} else {{
+                    questionSpan.textContent = `{ownership_question}`;
+                }}
                 
                 headerRow.appendChild(name);
                 headerRow.appendChild(questionSpan);
-                
-                // Slider Section
+
+                // ... (Create Slider) ...
                 const sliderContainer = document.createElement('div');
                 sliderContainer.className = 'slider-container';
-                
                 const sliderRow = document.createElement('div');
                 sliderRow.className = 'slider-row';
-                
+
                 const labelLeft = document.createElement('div');
                 labelLeft.className = 'agent-label-text';
-                labelLeft.textContent = agentA.display_name;
-                
+                // labelLeft.textContent = window.agentA.display_name;
+                if (obj.is_attention_check) {{
+                    labelLeft.textContent = '0'; // 或者 'Left'
+                    labelLeft.style.color = '#999'; // 稍微变灰一点，表示这是刻度而非人名
+                }} else {{
+                    labelLeft.textContent = window.agentA.display_name;
+                }}
+
                 const trackWrap = document.createElement('div');
                 trackWrap.className = 'slider-track-wrap';
 
@@ -705,151 +789,135 @@ def render_core_script(objects_json, agents_json, agent_labels_json, include_sav
                 slider.min = '0';
                 slider.max = '100';
                 slider.value = '50';
-                
+
                 const ticksContainer = document.createElement('div');
                 ticksContainer.className = 'slider-ticks';
-
                 for (let t = 0; t <= 100; t += 10) {{
-                    // 这里的文字你可以根据需要修改，例如 'Unsure', 'Shared', 'Ambiguous'
-                    const middleText = "Unsure"; 
-
-                    // 优化：为了给中间的文字腾出空间，不渲染 40 和 60
-                    // if (t === 40 || t === 60) continue;
-
                     const tick = document.createElement('div');
-                    
                     if (t === 50) {{
-                        // 如果是 50，应用 .middle 样式并替换文字
                         tick.className = 'tick-label middle';
-                        tick.textContent = middleText;
+                        tick.textContent = "{slider_unsure}";
                     }} else {{  
-                        // 其他刻度保持原样
                         tick.className = 'tick-label' + (t === 0 ? ' start' : (t === 100 ? ' end' : ''));
                         tick.textContent = String(t);
                     }}
-                    
                     tick.style.left = `${{t}}%`;
                     ticksContainer.appendChild(tick);
                 }}
                 
                 trackWrap.appendChild(slider);
                 trackWrap.appendChild(ticksContainer);
-                
+
                 const labelRight = document.createElement('div');
                 labelRight.className = 'agent-label-text';
-                labelRight.textContent = agentB.display_name;
-                
+                // labelRight.textContent = window.agentB.display_name;
+                if (obj.is_attention_check) {{
+                    labelRight.textContent = '100'; // 或者 'Right'
+                    labelRight.style.color = '#999';
+                }} else {{
+                    labelRight.textContent = window.agentB.display_name;
+                }}
+
                 const confirmBtn = document.createElement('button');
                 confirmBtn.className = 'confirm-button';
-                confirmBtn.innerHTML = '<span>○</span> Confirm'; 
-                confirmBtn.setAttribute('data-id', obj.id);
+                confirmBtn.innerHTML = '<span>○</span> {confirm_text}'; 
                 
-                // Button Row
                 const buttonRow = document.createElement('div');
                 buttonRow.className = 'button-row';
                 buttonRow.appendChild(confirmBtn);
 
-                // Slider Logic
+                // Listeners
                 slider.addEventListener('input', (e) => {{
                     const value = parseInt(e.target.value);
-                    
                     if (value < 50) {{
-                        ownerships[obj.id] = {{ owner: agentA.id, confidence: value }};
+                        window.ownerships[obj.id] = {{ owner: window.agentA.id, confidence: value }};
                     }} else {{
-                        ownerships[obj.id] = {{ owner: agentB.id, confidence: value }};
+                        window.ownerships[obj.id] = {{ owner: window.agentB.id, confidence: value }};
                     }}
-                    
+                    // Hull opacity logic
                     document.querySelectorAll('.agent-hull').forEach(h => h.style.opacity = 0);
-                    let targetAgent = (value < 50) ? agentA : (value > 50 ? agentB : null);
+                    let targetAgent = (value < 50) ? window.agentA : (value > 50 ? window.agentB : null);
                     if(targetAgent) {{
                          const th = document.querySelector(`.agent-hull[data-agent-id="${{targetAgent.id}}"]`);
                          if(th) th.style.opacity = Math.abs(value - 50) / 50;
                     }}
                 }});
-                
-                // Add dim mode when adjusting slider
+
                 slider.addEventListener('mousedown', () => {{ enableDimMode(obj.id); }});
                 slider.addEventListener('mouseup', () => {{ disableDimMode(); }});
                 slider.addEventListener('touchstart', () => {{ enableDimMode(obj.id); }});
                 slider.addEventListener('touchend', () => {{ disableDimMode(); }});
-                
+
                 confirmBtn.addEventListener('click', () => {{
-                    if (confirmations[obj.id]) {{
-                        confirmations[obj.id] = false;
+                    if (window.confirmations[obj.id]) {{
+                        window.confirmations[obj.id] = false;
                         confirmBtn.classList.remove('confirmed');
-                        confirmBtn.innerHTML = '<span>○</span> Confirm';
+                        confirmBtn.innerHTML = '<span>○</span> {confirm_text}';
                         slider.disabled = false;
                         item.classList.remove('confirmed-item');
                     }} else {{
-                        confirmations[obj.id] = true;
+                        if (!window.ownerships[obj.id]) {{
+                            window.ownerships[obj.id] = {{ owner: null, confidence: 50 }};
+                        }}
+                        window.confirmations[obj.id] = true;
                         confirmBtn.classList.add('confirmed');
-                        confirmBtn.innerHTML = '<span>●</span> Locked';
+                        confirmBtn.innerHTML = '<span>●</span> {locked_text}';
                         slider.disabled = true;
                         item.classList.add('confirmed-item');
                     }}
                     checkAllConfirmed();
                 }});
-                
+
                 sliderRow.appendChild(labelLeft);
                 sliderRow.appendChild(trackWrap);
                 sliderRow.appendChild(labelRight);
-                
                 sliderContainer.appendChild(sliderRow);
                 sliderContainer.appendChild(buttonRow);
-
                 item.appendChild(headerRow);
                 item.appendChild(sliderContainer);
                 
-                // Add dim mode logic for item hover
-                item.addEventListener('mouseenter', () => {{ 
-                    highlightObject(obj.id, true);
-                    enableDimMode(obj.id);
-                }});
-                item.addEventListener('mouseleave', () => {{ 
-                    highlightObject(obj.id, false);
-                    disableDimMode();
-                }});
-
+                if (!obj.is_attention_check) {{
+                    item.addEventListener('mouseenter', () => {{ 
+                        highlightObject(obj.id, true);
+                        enableDimMode(obj.id);
+                    }});
+                    item.addEventListener('mouseleave', () => {{ 
+                        highlightObject(obj.id, false);
+                        disableDimMode();
+                    }});
+                }}
                 list.appendChild(item);
             }});
-            
             checkAllConfirmed();
         }}
         
         function checkAllConfirmed() {{
-            const totalCount = objects.length;
-            const confirmedCount = Object.values(confirmations).filter(v => v === true).length;
+            const totalCount = window.objects.length;
+            const confirmedCount = Object.values(window.confirmations).filter(v => v === true).length;
             const saveBtn = document.querySelector('.submit-button');
-            
             if (saveBtn) {{
                 saveBtn.disabled = !(confirmedCount === totalCount && totalCount > 0);
             }}
         }}
-        
+
         function highlightObject(objectId, highlight) {{
             const polygon = document.querySelector(`.object-polygon[data-id="${{objectId}}"]`);
             const listItem = document.querySelector(`.object-item[data-id="${{objectId}}"]`);
-            
             if (polygon) polygon.classList.toggle('highlighted', highlight);
             if (listItem) listItem.classList.toggle('highlighted', highlight);
         }}
         
-        // --- NEW DIMMING FUNCTIONS ---
         function enableDimMode(activeObjectId) {{
             document.body.classList.add('dimmed-mode');
-            
             const polygon = document.querySelector(`.object-polygon[data-id="${{activeObjectId}}"]`);
             const listItem = document.querySelector(`.object-item[data-id="${{activeObjectId}}"]`);
-            
             if (polygon) polygon.classList.add('active-spotlight');
             if (listItem) listItem.classList.add('active-spotlight');
         }}
         
         function disableDimMode() {{
             document.body.classList.remove('dimmed-mode');
-            document.querySelectorAll('.active-spotlight').forEach(el => {{
-                el.classList.remove('active-spotlight');
-            }});
+            document.querySelectorAll('.active-spotlight').forEach(el => el.classList.remove('active-spotlight'));
         }}
         
         function scrollToObject(objectId) {{
@@ -860,7 +928,7 @@ def render_core_script(objects_json, agents_json, agent_labels_json, include_sav
                 setTimeout(() => item.classList.remove('highlighted'), 2000);
             }}
         }}
-        
+
         {save_function}
     """
 

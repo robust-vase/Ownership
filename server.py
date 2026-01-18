@@ -4,12 +4,15 @@ Server
 Flask entry point.
 Includes Session Management for Participants.
 """
-from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for
+from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, send_file
 from flask_cors import CORS
 import json
 import re
 from pathlib import Path
 import os
+import io
+import zipfile
+from datetime import datetime
 
 import config
 from generators.page_generators import generate_html_page
@@ -25,8 +28,12 @@ from core.ownership_manager import (
     block_user, 
     is_blocked,
     get_admin_stats,
-    reset_pool_status
+    reset_pool_status,
+    get_participant_details,
+    get_pool_aggregate_stats,
+    get_all_participant_files
 )
+from core.translations import get_text
 
 app = Flask(__name__)
 CORS(app)
@@ -83,19 +90,31 @@ def login():
     # 0. 防刷检查
     client_ip = request.remote_addr
     if is_blocked(client_ip):
-         return "<h1>Access Denied</h1><p>Based on previous sessions, you are not eligible for this experiment.</p>"
+        # Get language for error message
+        lang = request.args.get('lang', session.get('lang', config.DEFAULT_LANGUAGE))
+        title = get_text(lang, 'errors.access_denied_title')
+        msg = get_text(lang, 'errors.access_denied_message')
+        return f"<h1>{title}</h1><p>{msg}</p>"
 
     if request.method == 'GET':
-        return generate_login_html()
+        # Get language from query param or session, default to config.DEFAULT_LANGUAGE
+        lang = request.args.get('lang', session.get('lang', config.DEFAULT_LANGUAGE))
+        session['lang'] = lang
+        return generate_login_html(lang=lang)
     
     try:
+        # Get language from hidden form field
+        lang = request.form.get('language', config.DEFAULT_LANGUAGE)
+        session['lang'] = lang
+        
         demographics = {
             "gender": request.form.get('gender'),
             "dob": request.form.get('dob'),
             "status": request.form.get('status'),
             "education": request.form.get('education'),
             "nationality": request.form.get('nationality'),
-            "ip_address": client_ip
+            "ip_address": client_ip,
+            "language": lang  # Store language preference
         }
         
         # 只初始化用户，不分配题目
@@ -109,7 +128,8 @@ def login():
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return generate_login_html(error_message=f"Error: {str(e)}")
+        lang = request.form.get('language', config.DEFAULT_LANGUAGE)
+        return generate_login_html(error_message=f"Error: {str(e)}", lang=lang)
     
 @app.route('/logout')
 def logout():
@@ -123,6 +143,55 @@ def fail_screening():
     session.clear()
     return jsonify({"status": "blocked"})
 
+
+@app.route('/fail_attention')
+def fail_attention():
+    """Route shown when user fails attention check early in experiment."""
+    lang = session.get('lang', config.DEFAULT_LANGUAGE)
+    session.clear()  # End their session
+    
+    # Get translated messages
+    title = get_text(lang, 'attention_fail.title')
+    message = get_text(lang, 'attention_fail.message')
+    
+    return f"""
+    <!DOCTYPE html>
+    <html lang="{lang}">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{title}</title>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+                background: #f4f6f8;
+                height: 100vh;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                margin: 0;
+            }}
+            .card {{
+                background: white;
+                padding: 40px;
+                border-radius: 16px;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+                text-align: center;
+                max-width: 500px;
+            }}
+            h1 {{ color: #2d3748; margin-bottom: 16px; }}
+            p {{ color: #718096; line-height: 1.6; }}
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1>{title}</h1>
+            <p>{message}</p>
+        </div>
+    </body>
+    </html>
+    """
+
 # --- MODIFIED: MAIN ROUTES (Protected) ---
 @app.route('/')
 def index():
@@ -130,6 +199,7 @@ def index():
         return redirect('/login')
 
     user_id = session['user_id']
+    lang = session.get('lang', config.DEFAULT_LANGUAGE)
 
     # 自动获取下一个场景
     scene_name, current_idx, total_count = get_next_scene(user_id)
@@ -141,13 +211,19 @@ def index():
     # 如果没有场景了，说明做完了
     if scene_name is None:
         exit_fs_script = "<script>if(document.exitFullscreen) { document.exitFullscreen().catch(e=>{}); }</script>"
+        # Get translated completion messages
+        complete_title = get_text(lang, 'complete.title')
+        complete_msg = get_text(lang, 'complete.message')
+        complete_thanks = get_text(lang, 'complete.thanks')
+        complete_hint = get_text(lang, 'complete.close_hint')
+        
         return f"""
         <!DOCTYPE html>
-        <html lang="en">
+        <html lang="{lang}">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Experiment Completed</title>
+            <title>{complete_title}</title>
             <style>
                 body {{
                     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
@@ -174,9 +250,9 @@ def index():
         <body>
             <div class="card">
                 <span class="check-icon">🎉</span>
-                <h1>Session Completed</h1>
-                <p>You have successfully completed all the assigned scenes.<br>Thank you for your contribution to our research!</p>
-                <p style="font-size: 14px; color: #a0aec0;">You may now close this window.</p>
+                <h1>{complete_title}</h1>
+                <p>{complete_msg}<br>{complete_thanks}</p>
+                <p style="font-size: 14px; color: #a0aec0;">{complete_hint}</p>
             </div>
             {exit_fs_script}
         </body>
@@ -202,21 +278,17 @@ def index():
     
     # === 关键修改 ===
     # 获取该场景所属的 pool (例如 "1", "2")
-    pool_id = scene_info.get('pool', '')
+    pool_id = scene_info.get('pool', '1')
     
     # 构建 URL 时加入 pool_id
-    # 结果变成: /scenes/1/batch_8/TopCamera_rgb.png
-    if pool_id:
-        image_url = f"/scenes/{pool_id}/{scene_name}/{image_name}"
-    else:
-        # 兼容以前没有 Pool 的情况
-        image_url = f"/scenes/{scene_name}/{image_name}"
+    image_url = f"/scenes/{pool_id}/{scene_name}/{image_name}"
     # ===============
 
     html = generate_html_page(
         scene_data, camera_data, image_name, image_url,
         scene_name, 
-        current_idx, total_count
+        current_idx, total_count,
+        lang=lang
     )
     return html
 
@@ -225,6 +297,8 @@ def index():
 def tutorial():
     if 'user_id' not in session:
         return redirect('/login')
+    
+    lang = session.get('lang', config.DEFAULT_LANGUAGE)
         
     def load_scene_context(scene_dir_name):
         base_path = Path(__file__).parent / 'guide_data' / scene_dir_name
@@ -251,7 +325,7 @@ def tutorial():
     if not ctx_1 or not ctx_2 or not ctx_3: 
         return "Tutorial data missing (Check guide_1, guide_2, guide_3 folder structure)", 404
     
-    html = generate_guide_html(ctx_1, ctx_2, ctx_3)
+    html = generate_guide_html(ctx_1, ctx_2, ctx_3, lang=lang)
     return html
 
 # --- MODIFIED: SAVE ROUTE (User Centric) ---
@@ -263,10 +337,27 @@ def save_ownerships_route():
 
     try:
         data = request.json
+        
+        # Task 3: Handle attention check failure
+        if data.get('status') == 'failed_attention':
+            user_id = session.get('user_id', 'unknown')
+            scene_name = data.get('scene', 'unknown')
+            print(f"[ATTENTION FAIL] User {user_id} failed attention check at scene {scene_name}")
+            return jsonify({
+                "status": "failed",
+                "action": "redirect",
+                "url": "/fail_attention"
+            })
+        
         scene_name = data.get('scene')
         annotations = data.get('annotations', [])
         duration = data.get('duration_ms', 0)
+        attention_failed = data.get('attention_failed', False)
         user_id = session['user_id']
+        
+        # Log attention failure warning (but allow save)
+        if attention_failed:
+            print(f"[ATTENTION WARNING] User {user_id} had attention fail at scene {scene_name} (late stage - allowed)")
         
         save_participant_results(user_id, scene_name, annotations, duration)
         
@@ -317,6 +408,61 @@ def api_pool_status():
     return jsonify(pool_status)
 
 
+@app.route('/admin/download_zip')
+def admin_download_zip():
+    """下载所有参与者数据的ZIP文件"""
+    admin_key = request.args.get('key', '')
+    if admin_key != 'brain2026':
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    # Create in-memory ZIP file
+    memory_file = io.BytesIO()
+    
+    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+        participant_files = get_all_participant_files()
+        for file_path in participant_files:
+            # Add file to ZIP with just the filename (not full path)
+            zf.write(file_path, file_path.name)
+    
+    memory_file.seek(0)
+    
+    # Generate timestamp for filename
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"participants_data_{timestamp}.zip"
+    
+    return send_file(
+        memory_file,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=filename
+    )
+
+
+@app.route('/api/participant/<user_id>')
+def api_participant_details(user_id):
+    """API: 获取单个参与者的详细数据"""
+    admin_key = request.args.get('key', '')
+    if admin_key != 'brain2026':
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    details = get_participant_details(user_id)
+    if details is None:
+        return jsonify({"error": "Participant not found"}), 404
+    
+    return jsonify(details)
+
+
+@app.route('/api/pool_stats/<pool_id>')
+def api_pool_aggregate_stats(pool_id):
+    """API: 获取特定池子的聚合统计数据"""
+    admin_key = request.args.get('key', '')
+    if admin_key != 'brain2026':
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    stats = get_pool_aggregate_stats(pool_id)
+    return jsonify(stats)
+
+
 # ==================== STATIC FILE ROUTES ====================
 
 @app.route('/guide_images/<path:subpath>')
@@ -326,15 +472,37 @@ def serve_guide_image(subpath):
 
 @app.route('/scenes/<path:filepath>')
 def serve_scene_file(filepath):
-    full_path = config.SCENES_ROOT / filepath
-    return send_from_directory(str(full_path.parent), full_path.name)
+    return send_from_directory(config.SCENES_ROOT, filepath)
 
 @app.route('/api/scenes')
 def list_scenes():
     scenes = config.scan_scenes(config.SCENES_ROOT)
     return jsonify({"scenes": [s['name'] for s in scenes]})
 
+def get_local_ip():
+    """Get the local IP address for LAN access."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
 if __name__ == '__main__':
+    local_ip = get_local_ip()
     print(f"[INFO] Starting server on {config.SERVER_HOST}:{config.SERVER_PORT}")
     print(f"[INFO] Debug mode: {config.DEBUG_MODE}")
+    print(f"")
+    print(f"  Local:   http://127.0.0.1:{config.SERVER_PORT}/")
+    print(f"  Network: http://{local_ip}:{config.SERVER_PORT}/")
+    print(f"")
+    print(f"  [INFO] Admin Dashboard: http://{local_ip}:{config.SERVER_PORT}/admin?key=brain2026")
+    print(f"")
     app.run(host=config.SERVER_HOST, port=config.SERVER_PORT, debug=config.DEBUG_MODE)
+
+
+

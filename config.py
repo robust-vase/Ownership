@@ -8,17 +8,19 @@ import os
 import secrets
 
 # ==================== Paths ====================
-SCENES_ROOT_PATH = os.getenv('SCENES_ROOT', r"D:\tongsim-python\ownership\web_3\question_pool")
-SCENES_ROOT = Path(SCENES_ROOT_PATH)
+# SCENES_ROOT_PATH = os.getenv('SCENES_ROOT', r"D:\tongsim-python\ownership\web_3\question_pool")
+# SCENES_ROOT = Path(SCENES_ROOT_PATH)
 
-# Github 仓库
-# BASE_DIR = Path(__file__).resolve().parent
-# SCENES_ROOT = BASE_DIR / 'swap'
+BASE_DIR = Path(__file__).resolve().parent
+SCENES_ROOT = BASE_DIR / 'question_pool'
 
 # ==================== Server ====================
 SERVER_HOST = '0.0.0.0'
 SERVER_PORT = int(os.getenv('PORT', 5001))
 DEBUG_MODE = os.getenv('DEBUG', 'true').lower() == 'true'
+
+# ==================== Internationalization ====================
+DEFAULT_LANGUAGE = 'zh'  # Default to Chinese
 
 # ==================== Security ====================
 # CRITICAL: Set this in environment variable for production!

@@ -13,6 +13,7 @@ from collections import Counter
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.projection_util import prepare_camera_params, project_aabb_to_polygon, get_agent_label_position, get_agent_hull
+from core.translations import get_text, TRANSLATIONS
 from config import EXCLUDED_TYPES, AGENT_BLUEPRINT_MAPPING, ROLE_COLORS, DISPLAY_CATEGORY_MAPPING
 
 
@@ -22,6 +23,27 @@ def _get_agent_role_from_blueprint(blueprint_id):
         if any(bp in blueprint_id for bp in blueprints):
             return role
     return 'person'
+
+
+def _translate_agent_role(role, lang='en'):
+    """Translate agent role to display name based on language."""
+    agent_roles = TRANSLATIONS.get('agent_roles', {})
+    if role in agent_roles:
+        return agent_roles[role].get(lang, agent_roles[role].get('en', role.title()))
+    return role.title()
+
+
+def _translate_object_category(category, lang='en'):
+    """Translate object category to display name based on language."""
+    object_categories = TRANSLATIONS.get('object_categories', {})
+    # Try exact match first
+    if category in object_categories:
+        return object_categories[category].get(lang, object_categories[category].get('en', category))
+    # Try title case (e.g., 'toy' -> 'Toy')
+    title_category = category.title()
+    if title_category in object_categories:
+        return object_categories[title_category].get(lang, object_categories[title_category].get('en', category))
+    return category
 
 
 def _generate_agent_color(agent_id, agent_base_id=None):
@@ -176,7 +198,7 @@ def process_scene_agents(scene_data, rotation_matrix, intrinsic_matrix, camera_l
     return agents_data, agent_labels
 
 
-def process_scene_data(scene_data, camera_data, use_display_mapping=True, filter_empty_plates=True):
+def process_scene_data(scene_data, camera_data, use_display_mapping=True, filter_empty_plates=True, lang='en'):
     """
     Complete scene data processing pipeline.
     
@@ -185,6 +207,7 @@ def process_scene_data(scene_data, camera_data, use_display_mapping=True, filter
         camera_data: Camera parameters dict
         use_display_mapping: If True, use DISPLAY_CATEGORY_MAPPING for object names
         filter_empty_plates: If True, skip plate objects
+        lang: Language code ('en' or 'zh') for display names
     
     Returns:
         Tuple of (objects_data, agents_data, agent_labels) - all with display_name set
@@ -199,17 +222,55 @@ def process_scene_data(scene_data, camera_data, use_display_mapping=True, filter
         filter_empty_plates=filter_empty_plates
     )
     
-    # Deduplicate object names
+    # Deduplicate object names (using English keys first for consistency)
     name_key = 'display_category' if use_display_mapping else 'base_name'
     _deduplicate_names(objects_data, name_key=name_key, output_key='display_name')
+    
+    # Translate object display names based on language
+    for obj in objects_data:
+        base_name = obj['display_name']
+        # Check if it has a numbered suffix (e.g., "Toy_1")
+        if '_' in base_name and base_name.split('_')[-1].isdigit():
+            parts = base_name.rsplit('_', 1)
+            translated_base = _translate_object_category(parts[0], lang)
+            obj['display_name'] = f"{translated_base}_{parts[1]}"
+        else:
+            obj['display_name'] = _translate_object_category(base_name, lang)
     
     # Process agents
     agents_data, agent_labels = process_scene_agents(
         scene_data, rotation_matrix, intrinsic_matrix, camera_location
     )
     
-    # Deduplicate agent names
+    # Deduplicate agent names (using English type keys first)
     _deduplicate_names(agents_data, name_key='type', output_key='display_name')
     _deduplicate_names(agent_labels, name_key='type', output_key='display_name')
+    
+    # Translate agent display names based on language
+    for agent in agents_data:
+        base_name = agent['display_name']
+        # Check if it has a numbered suffix (e.g., "boy_1")
+        if '_' in base_name:
+            parts = base_name.rsplit('_', 1)
+            if parts[-1].isdigit():
+                translated_base = _translate_agent_role(parts[0], lang)
+                agent['display_name'] = f"{translated_base}_{parts[1]}"
+            else:
+                # No suffix, just translate the whole thing
+                agent['display_name'] = _translate_agent_role(base_name, lang)
+        else:
+            agent['display_name'] = _translate_agent_role(base_name, lang)
+    
+    for label in agent_labels:
+        base_name = label['display_name']
+        if '_' in base_name:
+            parts = base_name.rsplit('_', 1)
+            if parts[-1].isdigit():
+                translated_base = _translate_agent_role(parts[0], lang)
+                label['display_name'] = f"{translated_base}_{parts[1]}"
+            else:
+                label['display_name'] = _translate_agent_role(base_name, lang)
+        else:
+            label['display_name'] = _translate_agent_role(base_name, lang)
     
     return objects_data, agents_data, agent_labels
