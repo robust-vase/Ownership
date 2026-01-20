@@ -554,8 +554,15 @@ def init_participant_file(demographics):
     """
     [修改后] 初始化用户：只存人口学信息，不分配题目，不分配 Pool。
     只有通过 Tutorial 后才会分配。
+    使用 participant_id 作为主要标识，添加时间戳后缀确保唯一性。
     """
-    user_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:6]}"
+    # 使用用户填写的 participant_id，加上时间戳确保唯一性
+    participant_id = demographics.get('participant_id', 'unknown')
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    unique_suffix = str(uuid.uuid4())[:4]  # 短后缀防止同一秒内重复
+    
+    # 格式: participantID_timestamp_suffix (e.g., zhangsan1234_20260119_153022_a1b2)
+    user_id = f"{participant_id}_{timestamp}_{unique_suffix}"
     
     data = {
         "user_id": user_id,
@@ -600,6 +607,30 @@ def get_next_scene(user_id):
             return scene, current_idx, total
             
     return None, total, total # 全部完成
+
+
+def get_upcoming_scenes(user_id, count=3):
+    """
+    获取用户接下来的几个场景名称（用于预加载）。
+    返回: list of scene_names (不包含当前正在做的)
+    """
+    file_path = DATA_ROOT / f"{user_id}.json"
+    
+    with safe_file_access(file_path, 'r') as f:
+        if not f:
+            return []
+        data = json.load(f)
+    
+    order = data['scene_order']
+    completed = set(data['completed_scenes'])
+    
+    # 找到所有未完成的场景
+    remaining = [scene for scene in order if scene not in completed]
+    
+    # 跳过当前正在做的（第一个），返回接下来的几个
+    if len(remaining) > 1:
+        return remaining[1:count+1]
+    return []
 
 
 def save_participant_results(user_id, scene_name, items_data, duration_ms=None):

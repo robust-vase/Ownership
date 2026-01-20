@@ -249,6 +249,37 @@ def _build_html_template(image_url, scene_name, objects_json, agents_json, agent
             }});
             window.resumeBtnListenerBound = true;
         }}
+        
+        // ==================== 图片预加载 ====================
+        // 在用户做当前题目时，后台预加载接下来 3 张图片
+        window.preloadedImages = window.preloadedImages || {{}};
+        
+        function preloadImages() {{
+            fetch('/api/preload_images?count=3')
+                .then(res => res.json())
+                .then(data => {{
+                    if (data.urls && data.urls.length > 0) {{
+                        console.log('[Preload] Starting to preload', data.urls.length, 'images');
+                        data.urls.forEach((url, idx) => {{
+                            if (!window.preloadedImages[url]) {{
+                                const img = new Image();
+                                img.onload = () => {{
+                                    console.log('[Preload] Cached:', url);
+                                    window.preloadedImages[url] = true;
+                                }};
+                                img.onerror = () => {{
+                                    console.warn('[Preload] Failed:', url);
+                                }};
+                                img.src = url;
+                            }}
+                        }});
+                    }}
+                }})
+                .catch(err => console.warn('[Preload] API error:', err));
+        }}
+        
+        // 页面加载后 1 秒开始预加载（给当前页面留出加载时间）
+        setTimeout(preloadImages, 1000);
     """
 
     fullscreen_overlay_css = """

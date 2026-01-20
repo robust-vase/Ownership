@@ -13,6 +13,7 @@ import secrets
 
 BASE_DIR = Path(__file__).resolve().parent
 SCENES_ROOT = BASE_DIR / 'question_pool'
+SCENES_ROOT = BASE_DIR / 'question_pool'
 
 # ==================== Server ====================
 SERVER_HOST = '0.0.0.0'
@@ -28,7 +29,8 @@ DEFAULT_LANGUAGE = 'zh'  # Default to Chinese
 SECRET_KEY = os.getenv('SECRET_KEY', None)
 if SECRET_KEY is None:
     # Auto-generate for development (will change on restart - sessions won't persist)
-    SECRET_KEY = secrets.token_hex(32)
+    # SECRET_KEY = secrets.token_hex(32)
+    SECRET_KEY = os.getenv('SECRET_KEY', 'FixedSecretKey_For_My_Experiment_2026')
     print("[WARNING] Using auto-generated SECRET_KEY. Set SECRET_KEY env var for production!")
 
 # ==================== Scene Processing ====================

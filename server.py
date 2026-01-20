@@ -22,7 +22,8 @@ from generators.admin_generator import generate_admin_html
 from core.ownership_manager import (
     init_participant_file, 
     save_participant_results, 
-    get_next_scene, 
+    get_next_scene,
+    get_upcoming_scenes,
     assign_pool_strategy,
     mark_user_completed,
     block_user, 
@@ -107,12 +108,17 @@ def login():
         lang = request.form.get('language', config.DEFAULT_LANGUAGE)
         session['lang'] = lang
         
+        # Combine year and month for DOB
+        dob_year = request.form.get('dob_year', '')
+        dob_month = request.form.get('dob_month', '')
+        dob = f"{dob_year}-{dob_month}" if dob_year and dob_month else ''
+        
         demographics = {
+            "participant_id": request.form.get('participant_id'),
             "gender": request.form.get('gender'),
-            "dob": request.form.get('dob'),
+            "dob": dob,
             "status": request.form.get('status'),
             "education": request.form.get('education'),
-            "nationality": request.form.get('nationality'),
             "ip_address": client_ip,
             "language": lang  # Store language preference
         }
@@ -282,7 +288,8 @@ def index():
     
     # 构建 URL 时加入 pool_id
     image_url = f"/scenes/{pool_id}/{scene_name}/{image_name}"
-    # ===============
+
+
 
     html = generate_html_page(
         scene_data, camera_data, image_name, image_url,
@@ -374,6 +381,44 @@ def save_ownerships_route():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ==================== PRELOAD API ====================
+
+@app.route('/api/preload_images')
+def api_preload_images():
+    """
+    返回接下来几张图片的 URL，供前端预加载。
+    默认返回接下来 3 张图片的 URL。
+    """
+    if 'user_id' not in session:
+        return jsonify({"urls": []})
+    
+    user_id = session['user_id']
+    count = request.args.get('count', 3, type=int)
+    
+    # 获取接下来的场景
+    upcoming = get_upcoming_scenes(user_id, count)
+    
+    if not upcoming:
+        return jsonify({"urls": []})
+    
+    # 查找每个场景的图片 URL
+    scenes = config.scan_scenes(config.SCENES_ROOT)
+    scene_map = {s['name']: s for s in scenes}
+    
+    urls = []
+    for scene_name in upcoming:
+        scene_info = scene_map.get(scene_name)
+        if scene_info:
+            scene_path = scene_info['path']
+            image_name = get_first_image(scene_path)
+            if image_name:
+                pool_id = scene_info.get('pool', '1')
+                url = f"/scenes/{pool_id}/{scene_name}/{image_name}"
+                urls.append(url)
+    
+    return jsonify({"urls": urls})
 
 
 # ==================== ADMIN ROUTES ====================

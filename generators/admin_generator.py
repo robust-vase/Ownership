@@ -350,11 +350,14 @@ def generate_admin_html(pool_status, participants_summary, config_info):
     # Build participants table HTML
     participants_rows = ""
     for p in participants_summary:
+        # Extract participant_id from demographics for display
+        participant_id = p.get('demographics', {}).get('participant_id', '-')
+        user_id_full = p.get('user_id', '')
         status_class = "status-" + p.get('status', 'unknown').replace(' ', '-').lower()
         user_id = p.get('user_id', 'N/A')
         participants_rows += f"""
         <tr>
-            <td>{user_id[:20]}...</td>
+            <td title="{user_id_full}">{participant_id}</td>
             <td>{p.get('pool', '-')}</td>
             <td>{p.get('completed', 0)}/{p.get('total', 0)}</td>
             <td><span class="status-badge {status_class}">{p.get('status', 'Unknown')}</span></td>
@@ -639,7 +642,7 @@ def generate_admin_html(pool_status, participants_summary, config_info):
             <table class="participants-table">
                 <thead>
                     <tr>
-                        <th>User ID</th>
+                        <th>Participant ID</th>
                         <th>Pool</th>
                         <th>Progress</th>
                         <th>Status</th>

@@ -362,7 +362,6 @@ def render_common_css():
             white-space: nowrap; /* 防止文字换行 */
         }
         
-        /* 新增：中间语义标签的特定样式 */
         .tick-label.middle {
             color: #000;         /* 加深颜色 */
             font-weight: 700;    /* 加粗 */
@@ -460,6 +459,33 @@ def render_common_css():
         }
         .status-message.success { background: #f0fff4; color: #2f855a; }
         .status-message.error { background: #fff5f5; color: #c53030; }
+
+        /* === MOBILE BLOCKER (新增) === */
+        #mobile-blocker {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #f4f6f8;
+            z-index: 2147483647; /* 确保层级最高，盖住一切 */
+            display: none; /* 默认隐藏，JS检测到才显示 */
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 30px;
+        }
+        #mobile-blocker .icon { font-size: 80px; margin-bottom: 24px; }
+        #mobile-blocker h1 { font-size: 24px; color: #1a1a1a; margin-bottom: 16px; font-weight: 700; }
+        #mobile-blocker p { font-size: 16px; color: #666; line-height: 1.6; max-width: 500px; }
+        
+        /* 额外的 CSS 媒体查询保险 (防止 JS 失效) */
+        /* 如果屏幕宽度小于 768px (一般手机竖屏)，直接隐藏主要内容 */
+        @media (max-width: 768px) {
+            .container, .header { display: none !important; }
+        }
+
     """
 
 
@@ -615,11 +641,38 @@ def render_core_script(objects_json, agents_json, agent_labels_json, include_sav
                                 const parser = new DOMParser();
                                 const newDoc = parser.parseFromString(html, 'text/html');
                                 
-                                document.head.innerHTML = newDoc.head.innerHTML;
-                                document.body.innerHTML = newDoc.body.innerHTML;
-                                document.body.className = newDoc.body.className;
+                                // === SOFT UPDATE: Preserve fullscreen mode ===
+                                // 1. Update .header content (if exists in both)
+                                const oldHeader = document.querySelector('.header');
+                                const newHeader = newDoc.querySelector('.header');
+                                if (oldHeader && newHeader) {
+                                    oldHeader.innerHTML = newHeader.innerHTML;
+                                }
                                 
-                                // Re-execute scripts
+                                // 2. Update .container content (main panels)
+                                const oldContainer = document.querySelector('.container');
+                                const newContainer = newDoc.querySelector('.container');
+                                if (oldContainer && newContainer) {
+                                    oldContainer.innerHTML = newContainer.innerHTML;
+                                }
+                                
+                                // 3. Preserve focus-mode and other body classes, but sync new classes
+                                const currentClasses = document.body.className.split(' ').filter(c => c.trim());
+                                const newClasses = newDoc.body.className.split(' ').filter(c => c.trim());
+                                // Keep 'focus-mode' if currently active (fullscreen state)
+                                const hasFocusMode = currentClasses.includes('focus-mode');
+                                // Start with new classes
+                                let finalClasses = [...newClasses];
+                                // Re-add focus-mode if it was present
+                                if (hasFocusMode && !finalClasses.includes('focus-mode')) {
+                                    finalClasses.push('focus-mode');
+                                }
+                                document.body.className = finalClasses.join(' ');
+                                
+                                // 4. Fullscreen overlay is preserved (not touched)
+                                // The #fullscreen-overlay element remains in place
+                                
+                                // 5. Re-execute scripts from new document
                                 const scripts = newDoc.querySelectorAll('script');
                                 scripts.forEach(oldScript => {
                                     const newScript = document.createElement('script');
@@ -628,7 +681,7 @@ def render_core_script(objects_json, agents_json, agent_labels_json, include_sav
                                 });
                             })
                             .catch(err => {
-                                console.error('DOM swap failed:', err);
+                                console.error('Soft update failed:', err);
                                 window.location.reload();
                             });
                     }
@@ -647,6 +700,39 @@ def render_core_script(objects_json, agents_json, agent_labels_json, include_sav
     """ if include_save_function else ""
     
     return f"""
+
+        (function checkDeviceCompatibility() {{
+            // 1. 检测 User Agent (是否是移动设备)
+            const isMobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            
+            // 2. 检测屏幕宽度 (是否小于 1024px，通常 iPad 横屏或 PC 是 1024+)
+            // 这里设置 900 是一个比较宽松的界限，防止误杀小屏笔记本
+            const isSmallScreen = window.innerWidth < 900;
+            
+            if (isMobileUA || isSmallScreen) {{
+                // 创建遮罩层
+                const blocker = document.createElement('div');
+                blocker.id = 'mobile-blocker';
+                blocker.innerHTML = `
+                    <div class="icon">💻</div>
+                    <h1>Computer Only / 仅限电脑</h1>
+                    <p><strong>Please open this link on a Computer (Desktop/Laptop).</strong><br>
+                    This experiment requires a mouse and a large screen to function correctly.</p>
+                    <div style="margin-top:20px; padding-top:20px; border-top:1px solid #ddd; width:100%; max-width:300px;">
+                        <p style="font-size:14px;">本实验需要鼠标和大屏幕操作。<br>检测到您正在使用手机/平板或屏幕过小，已被禁止访问。</p>
+                    </div>
+                `;
+                document.body.appendChild(blocker);
+                blocker.style.display = 'flex';
+                
+                // 强制隐藏其他内容
+                document.querySelectorAll('.container, .header').forEach(el => el.style.display = 'none');
+                
+                // 停止后续脚本执行 (抛出一个假错误终止执行)
+                throw new Error("Mobile device detected - Experiment halted.");
+            }}
+        }})();
+
         // DATA INITIALIZATION
         // Note: Using var or assigning to window ensures variables persist/update correctly during swaps
         window.objects = {objects_json};

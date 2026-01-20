@@ -22,6 +22,26 @@ TRANSLATIONS = {
             "en": "Participant Info",
             "zh": "参与者信息"
         },
+        "participant_id": {
+            "en": "Participant ID (Name Pinyin + Last 4 digits of Phone)",
+            "zh": "被试ID (姓名拼音+手机尾号后四位)"
+        },
+        "participant_id_placeholder": {
+            "en": "e.g. Toy1234",
+            "zh": "例如: ZhangSan1234"
+        },
+        "consent_title": {
+            "en": "Informed Consent",
+            "zh": "知情同意书"
+        },
+        "consent_content": {
+            "en": "This experiment is conducted for academic research purposes. Your data will be kept strictly confidential and used only for scientific analysis. Participation is voluntary, and you may withdraw at any time without penalty. By clicking 'Start Experiment', you agree to participate.",
+            "zh": "本实验仅用于学术研究目的。您的数据将被严格保密，仅用于科学分析。参与完全自愿，您可以随时退出而不会受到任何影响。点击“开始实验”即表示您同意参与。"
+        },
+        "consent_checkbox": {
+            "en": "I have read and agree to the above informed consent",
+            "zh": "我已阅读并同意以上知情同意书"
+        },
         "gender": {
             "en": "Gender",
             "zh": "性别"
@@ -218,8 +238,8 @@ TRANSLATIONS = {
             "zh": "欢迎"
         },
         "step1_content": {
-            "en": "Welcome to the <strong>Ownership Cognition Experiment</strong>.<br>For the best experience, switch to full screen.",
-            "zh": "欢迎参加<strong>所有权认知实验</strong>。<br>为了获得最佳体验，请切换到全屏模式。"
+            "en": "Welcome to the <strong>Experiment</strong>.<br>For the best experience, switch to full screen.",
+            "zh": "欢迎参加<strong>实验</strong>。<br>为了获得最佳体验，请切换到全屏模式。"
         },
         "step1_button": {
             "en": "Enter Fullscreen",
@@ -236,8 +256,8 @@ TRANSLATIONS = {
             "zh": "视觉判断"
         },
         "step2_content": {
-            "en": "We focus on <strong>Psychological Ownership</strong> based on visual intuition.",
-            "zh": "我们关注基于视觉直觉的<strong>心理所有权</strong>。"
+            "en": "Welcome to the experiment. In this study, you will see a series of daily life images featuring objects on a table. Your task is to judge the ownership of these objects (who they are more likely to belong to) based on your intuition.",
+            "zh": "欢迎参加本实验，在本实验中，你将看到一系列生活化的关于桌面物品的图片。你的任务是基于你的直觉，判断图片中物品的所有权<strong>（物品更有可能是谁的） </strong>。"
         },
         "step2_wrong_label": {
             "en": "No External Clues",
@@ -245,15 +265,15 @@ TRANSLATIONS = {
         },
         "step2_wrong_hint": {
             "en": "Don't guess who bought it",
-            "zh": "不要猜测背后是谁买的"
+            "zh": "不要过度揣测"
         },
         "step2_correct_label": {
-            "en": "Visual Intuition",
-            "zh": "视觉直觉"
+            "en": "Follow Intuition to judge",
+            "zh": "根据直觉做出判断"
         },
         "step2_correct_hint": {
             "en": "Judge based on the image",
-            "zh": "根据图像判断"
+            "zh": "根据图像做出符合你直觉的判断"
         },
         "step2_button": {
             "en": "I Understand",
@@ -271,7 +291,7 @@ TRANSLATIONS = {
         },
         "step3_content": {
             "en": "<p class=\"modal-text\">In this scene, you see <strong>Two People</strong> and <strong>Objects</strong> on the table.</p><p class=\"modal-text\">Task: Judge who owns each object.</p>",
-            "zh": "<p class=\"modal-text\">在这个场景中，您可以看到<strong>两个人</strong>和桌上的<strong>物品</strong>。</p><p class=\"modal-text\">任务：判断每个物品属于谁。</p>"
+            "zh": "<p class=\"modal-text\">在这个场景中，您可以看到<strong>两个人</strong>和桌上的<strong>物品</strong>。</p><p class=\"modal-text\"><strong>任务</strong>：判断每个物品属于谁。</p>"
         },
         
         # Step 4
@@ -290,7 +310,7 @@ TRANSLATIONS = {
                     <em>(The further you drag, the more certain you are.)</em>
                 </p>
                 <p><strong>Action: Drag the slider to indicate your confidence, then click "Confirm".</strong></p>""",
-            "zh": """<p>滑块表示所有权的<strong>可能性</strong>。</p>
+            "zh": """<p>滑块表示物品所有权的<strong>可能性</strong>。</p>
                 <ul style="line-height: 1.6;">
                     <li>← <strong>靠近左边</strong>：更可能属于<strong>左边的人</strong>。</li>
                     <li>→ <strong>靠近右边</strong>：更可能属于<strong>右边的人</strong>。</li>
@@ -299,7 +319,7 @@ TRANSLATIONS = {
                 <p style="margin-top:10px; font-size: 13px; color: #666;">
                     <em>（拖动越远，表示您越确定。）</em>
                 </p>
-                <p><strong>操作：拖动滑块表示您的判断，然后点击"确认"。</strong></p>"""
+                <p><strong>操作：拖动滑块给出您的判断，然后点击"锁定"。</strong></p>"""
         },
         
         # Step 5
@@ -341,7 +361,7 @@ TRANSLATIONS = {
         },
         "step7_content": {
             "en": "<p class=\"modal-text\">Now, a <strong>check scene</strong>. Rely on intuition.</p>",
-            "zh": "<p class=\"modal-text\">现在进行一个<strong>检查场景</strong>。请依靠直觉判断。</p>"
+            "zh": "<p class=\"modal-text\">现在进行一个<strong>练习场景</strong>。请依靠直觉判断。</p>"
         },
         "step7_button": {
             "en": "Start Test",
@@ -400,12 +420,12 @@ TRANSLATIONS = {
             "zh": "<strong>注意：</strong>没有对错之分，请依靠第一直觉。"
         },
         "step9_content": {
-            "en": "<p class=\"modal-text\">No moral judgment involved. Ignore external characteristics.</p>",
-            "zh": "<p class=\"modal-text\">不涉及道德判断。请忽略外部特征。</p>"
+            "en": "<p class=\"modal-text\">Just follow your gut feeling - don't overthink it!</p>",
+            "zh": "<p class=\"modal-text\">请跟随你的直觉，认真作答！</p>"
         },
         "step9_button": {
-            "en": "Next: Simulation",
-            "zh": "下一步：模拟"
+            "en": "Next: Practice",
+            "zh": "下一步：练习"
         },
         
         # Step 10 (Fail)
@@ -429,7 +449,7 @@ TRANSLATIONS = {
         },
         "step11_title": {
             "en": "Workflow Simulation",
-            "zh": "工作流模拟"
+            "zh": "实验练习"
         },
         "step11_content": {
             "en": """<p class="modal-text">We will now simulate the <strong>Real Experiment Workflow</strong>.</p>
@@ -453,7 +473,7 @@ TRANSLATIONS = {
         },
         "step11_button": {
             "en": "Start Simulation",
-            "zh": "开始模拟"
+            "zh": "开始练习"
         },
         
         # Step 13 (Final Ready)
@@ -470,14 +490,14 @@ TRANSLATIONS = {
                     <span style="font-size:40px;">🚀</span>
                 </div>
                 <p class="modal-text">You have completed the tutorial.</p>
-                <p class="modal-text">There are approximately <strong>20 scenes</strong> in the main experiment.</p>
+                <p class="modal-text">There are approximately <strong>18 scenes</strong> in the main experiment, expected to take about 10 minutes.</p>
                 <p class="modal-text">Please maintain the same level of attention. Thank you!</p>""",
             "zh": """<div style="text-align:center; margin-bottom:20px;">
                     <span style="font-size:40px;">🚀</span>
                 </div>
                 <p class="modal-text">您已完成教程。</p>
-                <p class="modal-text">正式实验大约有 <strong>20 个场景</strong>。</p>
-                <p class="modal-text">请保持同样的注意力。谢谢！</p>"""
+                <p class="modal-text">正式实验大约有 <strong>36 个场景</strong>，预计 20 分钟。</p>
+                <p class="modal-text">请你在实验中保持注意力，认真完成实验！</p>"""
         },
         "step13_button": {
             "en": "Start Main Experiment",
