@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.data_processor import process_scene_data
 from core.translations import get_text
-from static_assets.ui_components import render_common_css, render_left_panel_html, render_right_panel_html, render_core_script
+from core.ui_components import render_common_css, render_left_panel_html, render_right_panel_html, render_core_script
 
 def generate_guide_html(ctx_1, ctx_2, ctx_3, lang='en'): # 接收三个场景 + 语言
     """Entry point to generate the HTML."""
@@ -138,7 +138,13 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json, lang='en'):
         body.step-4 .object-item { opacity: 0.1; pointer-events: none; filter: blur(2px); }
         body.step-4 .object-item:first-child { opacity: 1 !important; pointer-events: auto !important; filter: none !important; position: relative; z-index: 10005; background: white; box-shadow: 0 0 0 4px #667eea, 0 0 50px rgba(0,0,0,0.5); transform: scale(1.02); }
         
-        body.step-5 #right-panel-wrapper, body.step-8 #right-panel-wrapper { opacity: 1 !important; pointer-events: auto !important; z-index: 9990; }
+        /* Step 5: Spotlight on SECOND object (nth-child(2)) for unlock/modify lesson */
+        body.step-5 #right-panel-wrapper { opacity: 1; }
+        body.step-5 #objectList { opacity: 1; }
+        body.step-5 .object-item { opacity: 0.1; pointer-events: none; filter: blur(2px); }
+        body.step-5 .object-item:nth-child(2) { opacity: 1 !important; pointer-events: auto !important; filter: none !important; position: relative; z-index: 10005; background: white; box-shadow: 0 0 0 4px #667eea, 0 0 50px rgba(0,0,0,0.5); transform: scale(1.02); }
+        
+        body.step-5-interact #right-panel-wrapper, body.step-8 #right-panel-wrapper { opacity: 1 !important; pointer-events: auto !important; z-index: 9990; }
         
         body.step-6 #right-panel-wrapper { opacity: 1 !important; pointer-events: auto !important; }
         body.step-6 .matching-content { opacity: 0.3; }
@@ -349,14 +355,51 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json, lang='en'):
                 tooltip.innerHTML = `<h3>${{i18n.step4_tooltip_title}}</h3>${{i18n.step4_tooltip_content}}`;
 
             }} else if (step === 5) {{
+                // Step 5: Unlock/Modify Lesson - Spotlight on second object with pre-lock
+                document.body.classList.add('left-panel-visible', 'spotlight-mode', 'step-5');
                 backdrop.classList.add('active'); modal.classList.add('active');
+                
+                // Position modal to the right (like step 4)
+                modal.style.left = 'auto';
+                modal.style.right = '5%';
+                modal.style.transform = 'translateY(-50%)';
+                
                 stepBadge.textContent = i18n.step5_badge;
                 stepTitle.innerHTML = i18n.step5_title;
                 stepContent.innerHTML = i18n.step5_content;
                 nextBtn.textContent = i18n.step5_button;
+                
+                // Pre-lock the second object (index 1) with a preset value
+                setTimeout(() => {{
+                    const secondItem = document.querySelector('.object-item:nth-child(2)');
+                    if (secondItem && objects.length > 1) {{
+                        const objId = objects[1].id;
+                        const slider = secondItem.querySelector('.confidence-slider');
+                        const confirmBtn = secondItem.querySelector('.confirm-button');
+                        
+                        if (slider && confirmBtn) {{
+                            // Set slider to a preset value (e.g., 20 = leaning left)
+                            slider.value = '20';
+                            const presetValue = 20;
+                            
+                            // Record ownership
+                            window.ownerships[objId] = {{ owner: window.agentA.id, confidence: presetValue }};
+                            
+                            // Lock it
+                            window.confirmations[objId] = true;
+                            confirmBtn.classList.add('confirmed');
+                            confirmBtn.innerHTML = '<span>✓</span> ' + presetValue;
+                            slider.disabled = true;
+                            secondItem.classList.add('confirmed-item');
+                        }}
+                    }}
+                }}, 100);
+                
                 nextBtn.onclick = () => {{
                     modal.classList.remove('active'); backdrop.classList.remove('active');
-                    document.body.classList.add('left-panel-visible', 'step-5');
+                    modal.style.left = ''; modal.style.right = ''; modal.style.transform = '';
+                    document.body.classList.remove('step-5');
+                    document.body.classList.add('left-panel-visible', 'step-5-interact');
                 }};
             }} else if (step === 6) {{
                 document.body.classList.add('step-6');
@@ -468,11 +511,15 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json, lang='en'):
                     nextBtn.disabled = true;
                     nextBtn.textContent = i18n.step13_allocating;
                     
-                    fetch('/api/start_main_experiment', {{ method: 'POST' }})
+                    fetch('/api/start_main_experiment', {{ method: 'POST', credentials: 'same-origin' }})
                     .then(res => res.json())
                     .then(data => {{
                         if(data.status === 'success') {{
                             window.location.href = '/'; 
+                        }} else if(data.action === 'redirect_login') {{
+                            // Session expired, redirect to login
+                            alert(i18n.error_init + ': ' + (data.error || 'Session expired'));
+                            window.location.href = '/login';
                         }} else {{
                             alert(i18n.error_init + ': ' + (data.error || 'Unknown error'));
                             nextBtn.disabled = false;
@@ -526,11 +573,18 @@ def _build_tutorial_template(scene1_json, scene2_json, scene3_json, lang='en'):
             checkAllConfirmed = function() {{
                 originalCheckAllConfirmed();
                 if (currentSceneIndex === 1) {{
+                    // Step 4: First object confirmed -> Show Step 5 (unlock/modify lesson)
                     if (currentStep === 4 && objects.length > 0 && confirmations[objects[0].id]) showStep(5);
-                    if (currentStep === 5) {{
+                    
+                    // Step 5 interact: Check if user has interacted with the second object (unlocked and re-locked)
+                    // We just need all items confirmed to proceed to Step 6
+                    if (currentStep === 5 || document.body.classList.contains('step-5-interact')) {{
                         const totalCount = objects.length;
                         const confirmedCount = Object.values(confirmations).filter(v => v === true).length;
-                        if (confirmedCount === totalCount && totalCount > 0) showStep(6);
+                        if (confirmedCount === totalCount && totalCount > 0) {{
+                            document.body.classList.remove('step-5-interact');
+                            showStep(6);
+                        }}
                     }}
                 }}
             }};

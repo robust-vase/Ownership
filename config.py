@@ -170,4 +170,3 @@ def get_scenes_in_pool(pool_id):
             scene_names.append(item.name)
     return scene_names
 
-

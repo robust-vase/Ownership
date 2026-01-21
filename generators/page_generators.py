@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.data_processor import process_scene_data
 from core.translations import get_text
-from static_assets.ui_components import render_common_css, render_left_panel_html, render_right_panel_html, render_core_script
+from core.ui_components import render_common_css, render_left_panel_html, render_right_panel_html, render_core_script
 
 
 import random
@@ -30,12 +30,15 @@ ATTENTION_CHECK_QUESTIONS = [
 
 def should_inject_attention_check(current_idx):
     """
-    [修改后] 强制触发逻辑：
-    每10题的第5题触发 (5, 15, 25, 35...)
+    Attention check injection logic:
+    Triggers at specific indices: 5, 10, 15, 20, 25
+    
+    Rules for attention check failures:
+    - Failures at indices 5, 10, 15: Terminate experiment immediately
+    - Failures at indices 20, 25: Log but continue (forgiveness rule)
     """
-    if current_idx > 0 and (current_idx % 10) == 5:
-        return True
-    return False
+    attention_check_indices = [5, 10, 15, 20, 25]
+    return current_idx in attention_check_indices
 
 
 def generate_html_page(scene_data, camera_data, image_filename, image_url, scene_name, current_idx, total_count, lang='en'):
@@ -63,7 +66,7 @@ def generate_html_page(scene_data, camera_data, image_filename, image_url, scene
         # is_attention_check=True 会让它在 ui_components.py 中：
         # 1. 不会在 SVG 图片上画框（renderVisuals 会跳过）
         # 2. 会在右侧列表显示（populateObjectList 正常渲染）
-        stealth_name = "系统校准" if lang == 'zh' else "System Check" # 使用听起来很中性的名字
+        stealth_name = "检测" if lang == 'zh' else "Check" # 使用听起来很中性的名字
         attention_obj = {
             "id": check_id,
             "display_name": stealth_name,
@@ -186,17 +189,32 @@ def _build_html_template(image_url, scene_name, objects_json, agents_json, agent
         }
     """
     
-    # 页面逻辑脚本：控制5秒倒计时
+    # 页面逻辑脚本：控制5秒倒计时 + 全屏保护
     page_logic_script = f"""
+        // === GLOBAL STATE (use var to avoid redeclaration errors during soft update) ===
         window.currentScene = '{scene_name}';
         window.startTime = Date.now();
         window.currentSceneIdx = {current_idx}; 
-        window.attentionCheckMeta = {attention_meta_json}; // 这里传入了验证规则
+        window.attentionCheckMeta = {attention_meta_json};
         
+        // === CRITICAL: Transitioning flag for fullscreen protection ===
+        // Only set to false here if not already in a transition
+        if (typeof window.isTransitioning === 'undefined') {{
+            window.isTransitioning = false;
+        }}
+        
+        // === FULLSCREEN CHECK WITH TRANSITION PROTECTION ===
         window.checkFullscreenStatus = function() {{
-            const overlay = document.getElementById('fullscreen-overlay');
+            // CRITICAL: Do NOT show overlay if we're transitioning between scenes
+            if (window.isTransitioning === true) {{
+                console.log('[Fullscreen] Check skipped - transitioning...');
+                return;
+            }}
+            
+            var overlay = document.getElementById('fullscreen-overlay');
             if (overlay) {{
-                if (!document.fullscreenElement && !document.webkitFullscreenElement) {{
+                var isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+                if (!isFullscreen) {{
                     overlay.style.display = 'flex';
                 }} else {{
                     overlay.style.display = 'none';
@@ -204,70 +222,126 @@ def _build_html_template(image_url, scene_name, objects_json, agents_json, agent
             }}
         }};
         
+        // === EXIT FOCUS MODE (5 second delay) ===
         window.exitFocusMode = function() {{
             document.body.classList.remove('focus-mode');
-            if (typeof adjustSVGSize === 'function') {{
-                setTimeout(adjustSVGSize, 100); 
+            if (typeof window.adjustSVGSize === 'function') {{
+                setTimeout(window.adjustSVGSize, 100); 
             }}
         }};
         
+        // === SCENE LIFECYCLE - WAIT FOR IMAGE ===
         window.startSceneLifecycle = function() {{
-            console.log('Starting Scene Lifecycle...');
-            if (window.initSceneVisuals) {{
-                window.initSceneVisuals();
+            console.log('[Lifecycle] Starting scene lifecycle for:', window.currentScene);
+            
+            var img = document.getElementById('cameraImage');
+            
+            var initScene = function() {{
+                console.log('[Lifecycle] Image ready, initializing visuals...');
+                try {{
+                    if (typeof window.initSceneVisuals === 'function') {{
+                        window.initSceneVisuals();
+                    }}
+                }} catch(e) {{
+                    console.error('[Lifecycle] initSceneVisuals error:', e);
+                }}
+                
+                // Only check fullscreen if not transitioning
+                if (!window.isTransitioning) {{
+                    window.checkFullscreenStatus();
+                }}
+                
+                // Schedule exit from focus mode
+                setTimeout(function() {{
+                    window.exitFocusMode();
+                }}, 5000);
+                
+                // Clear transitioning flag after everything is set up
+                window.isTransitioning = false;
+            }};
+            
+            // Wait for image if not loaded
+            if (img) {{
+                if (img.complete && img.naturalWidth > 0) {{
+                    initScene();
+                }} else {{
+                    console.log('[Lifecycle] Waiting for image to load...');
+                    img.onload = initScene;
+                    img.onerror = function() {{
+                        console.warn('[Lifecycle] Image load error, proceeding anyway');
+                        initScene();
+                    }};
+                    // Safety timeout
+                    setTimeout(function() {{
+                        if (window.isTransitioning !== false) {{
+                            console.warn('[Lifecycle] Image timeout, forcing init');
+                            initScene();
+                        }}
+                    }}, 10000);
+                }}
+            }} else {{
+                initScene();
             }}
-            checkFullscreenStatus();
-            setTimeout(() => {{
-                exitFocusMode();
-            }}, 5000);
         }};
         
+        // === INITIAL PAGE LOAD ===
         if (document.readyState === 'loading') {{
             window.addEventListener('load', window.startSceneLifecycle);
         }} else {{
             window.startSceneLifecycle();
         }}
         
+        // === FULLSCREEN EVENT LISTENERS (only bind once) ===
         if (!window.fullscreenListenerBound) {{
-            document.addEventListener('fullscreenchange', checkFullscreenStatus);
-            document.addEventListener('webkitfullscreenchange', checkFullscreenStatus);
+            var fsHandler = function() {{
+                // Delay check slightly to avoid race conditions
+                setTimeout(function() {{
+                    window.checkFullscreenStatus();
+                }}, 100);
+            }};
+            document.addEventListener('fullscreenchange', fsHandler);
+            document.addEventListener('webkitfullscreenchange', fsHandler);
+            document.addEventListener('mozfullscreenchange', fsHandler);
+            document.addEventListener('MSFullscreenChange', fsHandler);
             window.fullscreenListenerBound = true;
         }}
         
+        // === RESUME BUTTON LISTENER (only bind once) ===
         if (!window.resumeBtnListenerBound) {{
-            document.addEventListener('click', (e) => {{
+            document.addEventListener('click', function(e) {{
                 if (e.target && e.target.id === 'resume-btn') {{
-                    const docEl = document.documentElement;
-                    if (docEl.requestFullscreen) {{
-                        docEl.requestFullscreen();
-                    }} else if (docEl.webkitRequestFullscreen) {{
-                        docEl.webkitRequestFullscreen();
+                    var docEl = document.documentElement;
+                    var requestFS = docEl.requestFullscreen || docEl.webkitRequestFullscreen || docEl.mozRequestFullScreen || docEl.msRequestFullscreen;
+                    if (requestFS) {{
+                        requestFS.call(docEl).then(function() {{
+                            var overlay = document.getElementById('fullscreen-overlay');
+                            if (overlay) overlay.style.display = 'none';
+                        }}).catch(function(err) {{
+                            console.error('[Fullscreen] Request failed:', err);
+                        }});
                     }}
-                    const overlay = document.getElementById('fullscreen-overlay');
-                    if (overlay) overlay.style.display = 'none';
                 }}
             }});
             window.resumeBtnListenerBound = true;
         }}
         
         // ==================== 图片预加载 ====================
-        // 在用户做当前题目时，后台预加载接下来 3 张图片
         window.preloadedImages = window.preloadedImages || {{}};
         
         function preloadImages() {{
             fetch('/api/preload_images?count=3')
-                .then(res => res.json())
-                .then(data => {{
+                .then(function(res) {{ return res.json(); }})
+                .then(function(data) {{
                     if (data.urls && data.urls.length > 0) {{
                         console.log('[Preload] Starting to preload', data.urls.length, 'images');
-                        data.urls.forEach((url, idx) => {{
+                        data.urls.forEach(function(url, idx) {{
                             if (!window.preloadedImages[url]) {{
-                                const img = new Image();
-                                img.onload = () => {{
+                                var img = new Image();
+                                img.onload = function() {{
                                     console.log('[Preload] Cached:', url);
                                     window.preloadedImages[url] = true;
                                 }};
-                                img.onerror = () => {{
+                                img.onerror = function() {{
                                     console.warn('[Preload] Failed:', url);
                                 }};
                                 img.src = url;
@@ -275,10 +349,10 @@ def _build_html_template(image_url, scene_name, objects_json, agents_json, agent
                         }});
                     }}
                 }})
-                .catch(err => console.warn('[Preload] API error:', err));
+                .catch(function(err) {{ console.warn('[Preload] API error:', err); }});
         }}
         
-        // 页面加载后 1 秒开始预加载（给当前页面留出加载时间）
+        // 页面加载后 1 秒开始预加载
         setTimeout(preloadImages, 1000);
     """
 

@@ -307,6 +307,10 @@ def _update_pool_status(pool_id, action="started"):
     action: "started" (分配时+1) 或 "completed" (全部做完时+1)
     """
     with safe_file_access(POOL_STATUS_FILE, 'r+') as f:
+        if f is None:
+            print(f"[ERROR] Pool status file not found, initializing...")
+            _get_pool_status()  # This will create the file
+            return
         data = json.load(f)
         pool_key = str(pool_id)
         
@@ -373,6 +377,8 @@ def assign_pool_strategy(user_id):
     user_file = DATA_ROOT / f"{user_id}.json"
     
     with safe_file_access(user_file, 'r+') as f:
+        if f is None:
+            raise Exception(f"User file not found: {user_file}. Please ensure the user has completed login.")
         user_data = json.load(f)
         user_data['assigned_pool'] = best_pool
         user_data['scene_order'] = all_scenes_in_pool
@@ -417,6 +423,9 @@ def mark_user_completed(user_id):
     already_marked = False
     
     with safe_file_access(user_file, 'r+') as f:
+        if f is None:
+            print(f"[ERROR] User file not found for mark_user_completed: {user_file}")
+            return
         user_data = json.load(f)
         pool_id = user_data.get('assigned_pool')
         

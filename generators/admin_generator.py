@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from static_assets.ui_components import render_common_css
+from core.ui_components import render_common_css
 
 
 def generate_admin_html(pool_status, participants_summary, config_info):

@@ -319,25 +319,31 @@ TRANSLATIONS = {
                 <p style="margin-top:10px; font-size: 13px; color: #666;">
                     <em>（拖动越远，表示您越确定。）</em>
                 </p>
-                <p><strong>操作：拖动滑块给出您的判断，然后点击"锁定"。</strong></p>"""
+                <hr style="margin: 12px 0; border: 0; border-top: 1px solid #eee;">
+                <p><strong>如何锁定答案：</strong></p>
+                <ul style="line-height: 1.6;">
+                    <li><strong>自动锁定：</strong>拖动滑块，松开鼠标后会自动锁定。</li>
+                    <li style="color: #d9534f;"><strong>手动锁定：</strong>如果您选择<strong>“不确定”（中间位置）</strong>，请直接手动点击下方的<strong>“锁定”按钮</strong>。</li>
+                </ul>
+                """
         },
         
-        # Step 5
+        # Step 5 - Modify Choice (Unlock/Re-lock)
         "step5_badge": {
             "en": "Step 5 / 11",
             "zh": "第 5 / 11 步"
         },
         "step5_title": {
-            "en": "Complete All",
-            "zh": "完成所有判断"
+            "en": "Modify Choice",
+            "zh": "修改已锁定的判断"
         },
         "step5_content": {
-            "en": "<p class=\"modal-text\">Assign ownership for <strong>ALL remaining objects</strong>.</p>",
-            "zh": "<p class=\"modal-text\">为<strong>所有剩余物品</strong>分配所有权。</p>"
+            "en": "<p class=\"modal-text\">This item is already <strong>locked</strong> (simulating a completed task).</p><p class=\"modal-text\">If you want to change it, click the black <strong>'Locked' button</strong> to unlock it, then drag the slider again.</p>",
+            "zh": "<p class=\"modal-text\">此物品已被<strong>锁定</strong>（模拟自动完成）。</p><p class=\"modal-text\">如需修改，请点击已锁定的<strong>黑色按钮</strong>进行解锁，然后重新拖动滑块。</p>"
         },
         "step5_button": {
-            "en": "OK",
-            "zh": "好的"
+            "en": "I Understand",
+            "zh": "我明白了"
         },
         
         # Step 6
@@ -490,13 +496,13 @@ TRANSLATIONS = {
                     <span style="font-size:40px;">🚀</span>
                 </div>
                 <p class="modal-text">You have completed the tutorial.</p>
-                <p class="modal-text">There are approximately <strong>18 scenes</strong> in the main experiment, expected to take about 10 minutes.</p>
+                <p class="modal-text">There are approximately <strong>24 scenes</strong> in the main experiment, expected to take about 15 minutes.</p>
                 <p class="modal-text">Please maintain the same level of attention. Thank you!</p>""",
             "zh": """<div style="text-align:center; margin-bottom:20px;">
                     <span style="font-size:40px;">🚀</span>
                 </div>
                 <p class="modal-text">您已完成教程。</p>
-                <p class="modal-text">正式实验大约有 <strong>36 个场景</strong>，预计 20 分钟。</p>
+                <p class="modal-text">正式实验大约有 <strong>24 个场景</strong>，预计 15 分钟。</p>
                 <p class="modal-text">请你在实验中保持注意力，认真完成实验！</p>"""
         },
         "step13_button": {
@@ -554,7 +560,7 @@ TRANSLATIONS = {
     },
     
     # ============================================================
-    # ATTENTION CHECK FAIL
+    # ATTENTION CHECK FAIL (Legacy - kept for backwards compatibility)
     # ============================================================
     "attention_fail": {
         "title": {
@@ -564,6 +570,139 @@ TRANSLATIONS = {
         "message": {
             "en": "Thank you for your participation. The experiment session has ended.",
             "zh": "感谢您的参与。实验已结束。"
+        }
+    },
+    
+    # ============================================================
+    # COMPLETION PAGES (Success, Tutorial Fail, Attention Fail)
+    # ============================================================
+    "completion": {
+        # Success Page
+        "success_title": {
+            "en": "Experiment Completed",
+            "zh": "实验完成"
+        },
+        "success_header": {
+            "en": "Congratulations!",
+            "zh": "恭喜您！"
+        },
+        "success_message": {
+            "en": "You have successfully completed all scenes in this experiment.",
+            "zh": "您已成功完成本实验的所有场景。"
+        },
+        "payment_form_title": {
+            "en": "Payment Information",
+            "zh": "支付信息"
+        },
+        "field_real_name": {
+            "en": "Real Name",
+            "zh": "真实姓名"
+        },
+        "field_phone": {
+            "en": "Phone Number",
+            "zh": "手机号"
+        },
+        "field_id_number": {
+            "en": "ID Number",
+            "zh": "身份证号"
+        },
+        "field_bank_branch": {
+            "en": "Bank Branch",
+            "zh": "开户行"
+        },
+        "field_bank_account": {
+            "en": "Bank Account Number",
+            "zh": "银行卡号"
+        },
+        "placeholder_name": {
+            "en": "Enter your legal name",
+            "zh": "请输入您的真实姓名"
+        },
+        "placeholder_phone": {
+            "en": "11-digit phone number",
+            "zh": "11位手机号码"
+        },
+        "placeholder_id": {
+            "en": "18-digit ID number",
+            "zh": "18位身份证号"
+        },
+        "placeholder_bank": {
+            "en": "e.g., CCB Hangzhou Branch",
+            "zh": "例如：建设银行杭州分行"
+        },
+        "placeholder_account": {
+            "en": "Your bank card number",
+            "zh": "您的银行卡号"
+        },
+        "submit_payment": {
+            "en": "Submit Payment Info",
+            "zh": "提交支付信息"
+        },
+        "submitting": {
+            "en": "Submitting...",
+            "zh": "提交中..."
+        },
+        "payment_success": {
+            "en": "Payment information submitted successfully! You will receive payment within 3-5 business days.",
+            "zh": "支付信息提交成功！您将在3-5个工作日内收到报酬。"
+        },
+        "submitted": {
+            "en": "Submitted",
+            "zh": "已提交"
+        },
+        "payment_note": {
+            "en": "Your personal information will only be used for payment purposes and will be kept strictly confidential.",
+            "zh": "您的个人信息仅用于支付报酬，将被严格保密。"
+        },
+        "close_hint": {
+            "en": "You may now close this window.",
+            "zh": "您现在可以关闭此窗口。"
+        },
+        
+        # Tutorial Fail Page
+        "tutorial_fail_title": {
+            "en": "Session Ended",
+            "zh": "实验结束"
+        },
+        "tutorial_fail_header": {
+            "en": "Thank You for Your Time",
+            "zh": "感谢您的参与"
+        },
+        "tutorial_fail_message": {
+            "en": "Based on your responses, your visual interpretation differs significantly from the baseline required for this study. Unfortunately, you are not eligible to continue with the main experiment. Thank you for your interest.",
+            "zh": "根据您的回答，您的视觉解读与本研究所需的基准存在显著差异。很遗憾，您不符合继续参与正式实验的条件。感谢您的关注。"
+        },
+        
+        # Attention Fail Page
+        "attention_fail_title": {
+            "en": "Experiment Terminated",
+            "zh": "实验终止"
+        },
+        "attention_fail_header": {
+            "en": "Experiment Terminated",
+            "zh": "实验已终止"
+        },
+        "attention_fail_message": {
+            "en": "The experiment has been terminated due to inconsistent responses on attention check questions. This is necessary to ensure data quality.",
+            "zh": "由于您在注意力检测题目上的回答不一致，实验已被终止。这是为了确保数据质量。"
+        },
+        "attention_fail_note": {
+            "en": "If you believe this is an error, please contact the research team with your participant ID.",
+            "zh": "如果您认为这是一个错误，请联系研究团队并提供您的参与者ID。"
+        },
+        
+        # Generic Page
+        "generic_title": {
+            "en": "Session Ended",
+            "zh": "会话结束"
+        },
+        "generic_header": {
+            "en": "Session Ended",
+            "zh": "会话结束"
+        },
+        "generic_message": {
+            "en": "Your session has ended. Thank you for your participation.",
+            "zh": "您的会话已结束。感谢您的参与。"
         }
     },
     

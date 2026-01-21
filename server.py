@@ -19,6 +19,7 @@ from generators.page_generators import generate_html_page
 from generators.guide_page_generator import generate_guide_html
 from generators.login_generator import generate_login_html
 from generators.admin_generator import generate_admin_html
+from generators.completion_generator import generate_completion_html
 from core.ownership_manager import (
     init_participant_file, 
     save_participant_results, 
@@ -75,15 +76,29 @@ def start_main_experiment():
     此时才正式分配 Pool。
     """
     if 'user_id' not in session:
-        return jsonify({"error": "Unauthorized"}), 401
+        print(f"[ERROR] start_main_experiment: No user_id in session. Session keys: {list(session.keys())}")
+        return jsonify({"error": "Unauthorized - Session expired or not set", "action": "redirect_login"}), 401
         
     user_id = session['user_id']
+    print(f"[INFO] start_main_experiment called for user: {user_id}")
+    
+    # 检查用户文件是否存在
+    from pathlib import Path
+    user_file = Path(__file__).parent / "participants_data" / f"{user_id}.json"
+    if not user_file.exists():
+        print(f"[ERROR] User file not found: {user_file}. Session is stale, clearing...")
+        session.clear()
+        return jsonify({"error": "Session expired - please login again", "action": "redirect_login"}), 401
+    
     try:
         # 这里调用 manager 分配 Pool
         pool_id = assign_pool_strategy(user_id)
+        print(f"[INFO] User {user_id} assigned to pool {pool_id}")
         return jsonify({"status": "success", "pool": pool_id})
     except Exception as e:
-        print(f"Error assigning pool: {e}")
+        import traceback
+        traceback.print_exc()
+        print(f"[ERROR] Error assigning pool for user {user_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -344,27 +359,45 @@ def save_ownerships_route():
 
     try:
         data = request.json
+        user_id = session['user_id']
+        lang = session.get('lang', 'en')
         
-        # Task 3: Handle attention check failure
+        # Task 3: Handle attention check failure with index-based rules
         if data.get('status') == 'failed_attention':
-            user_id = session.get('user_id', 'unknown')
             scene_name = data.get('scene', 'unknown')
-            print(f"[ATTENTION FAIL] User {user_id} failed attention check at scene {scene_name}")
-            return jsonify({
-                "status": "failed",
-                "action": "redirect",
-                "url": "/fail_attention"
-            })
+            current_idx = data.get('current_idx', 0)
+            
+            print(f"[ATTENTION FAIL] User {user_id} failed attention check at scene {scene_name} (idx={current_idx})")
+            
+            # Attention check failure rules:
+            # - At indices 5, 10, 15: Terminate experiment immediately
+            # - At indices 20, 25 (>= 20): Log but allow to continue (forgiveness rule)
+            if current_idx < 20:
+                # Hard failure - terminate experiment
+                block_user(user_id, reason=f"attention_fail_at_idx_{current_idx}")
+                return jsonify({
+                    "status": "failed",
+                    "action": "redirect",
+                    "url": f"/completion?status=attention_fail&lang={lang}"
+                })
+            else:
+                # Soft failure (forgiveness rule) - log but continue
+                print(f"[FORGIVENESS] User {user_id} failed at idx {current_idx} (>= 20) - continuing")
+                return jsonify({
+                    "status": "forgiven",
+                    "action": "reload",
+                    "message": "Attention check logged but forgiven (late stage)"
+                })
         
         scene_name = data.get('scene')
         annotations = data.get('annotations', [])
         duration = data.get('duration_ms', 0)
         attention_failed = data.get('attention_failed', False)
-        user_id = session['user_id']
+        current_idx = data.get('current_idx', 0)
         
         # Log attention failure warning (but allow save)
-        if attention_failed:
-            print(f"[ATTENTION WARNING] User {user_id} had attention fail at scene {scene_name} (late stage - allowed)")
+        if attention_failed and current_idx >= 20:
+            print(f"[ATTENTION WARNING] User {user_id} had attention fail at scene {scene_name} (idx={current_idx} - late stage - allowed)")
         
         save_participant_results(user_id, scene_name, annotations, duration)
         
@@ -374,6 +407,11 @@ def save_ownerships_route():
         # 如果 next_scene 为 None，说明刚刚保存的是最后一题 -> 标记完赛
         if next_scene is None:
             mark_user_completed(user_id)
+            return jsonify({
+                "status": "success",
+                "action": "redirect",
+                "url": f"/completion?status=success&lang={lang}"
+            })
         
         return jsonify({
             "status": "success",
@@ -506,6 +544,84 @@ def api_pool_aggregate_stats(pool_id):
     
     stats = get_pool_aggregate_stats(pool_id)
     return jsonify(stats)
+
+
+# ==================== COMPLETION ROUTES ====================
+
+@app.route('/completion')
+def completion_page():
+    """
+    Unified completion page for all experiment exit scenarios.
+    Query params:
+        - status: 'success', 'tutorial_fail', 'attention_fail'
+        - lang: 'en' or 'zh' (default: session lang or 'en')
+        - reason: optional additional context
+    """
+    status = request.args.get('status', 'success')
+    lang = request.args.get('lang', session.get('lang', 'en'))
+    reason = request.args.get('reason', '')
+    
+    # Get user_id from session for logging
+    user_id = session.get('user_id', 'anonymous')
+    print(f"[COMPLETION] User {user_id} reached completion page: status={status}, reason={reason}")
+    
+    html = generate_completion_html(status, lang)
+    return html
+
+
+@app.route('/api/submit_payment', methods=['POST'])
+def submit_payment_info():
+    """
+    API endpoint to save payment information for successful participants.
+    Saves payment info to the participant's JSON file.
+    """
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({"error": "Session expired or not logged in"}), 401
+    
+    try:
+        data = request.json
+        
+        # Extract payment fields
+        payment_info = {
+            "real_name": data.get('real_name', ''),
+            "phone": data.get('phone', ''),
+            "id_number": data.get('id_number', ''),
+            "bank_branch": data.get('bank_branch', ''),
+            "bank_account": data.get('bank_account', ''),
+            "submitted_at": datetime.now().isoformat()
+        }
+        
+        # Load participant file and add payment info
+        from core.ownership_manager import PARTICIPANTS_DIR
+        participant_file = PARTICIPANTS_DIR / f"{user_id}.json"
+        
+        if participant_file.exists():
+            with open(participant_file, 'r', encoding='utf-8') as f:
+                participant_data = json.load(f)
+            
+            participant_data['payment_info'] = payment_info
+            participant_data['payment_submitted'] = True
+            
+            with open(participant_file, 'w', encoding='utf-8') as f:
+                json.dump(participant_data, f, indent=2, ensure_ascii=False)
+            
+            print(f"[PAYMENT] Saved payment info for user {user_id}")
+            return jsonify({"status": "success", "message": "Payment info saved"})
+        else:
+            return jsonify({"error": "Participant file not found"}), 404
+            
+    except Exception as e:
+        print(f"[PAYMENT ERROR] User {user_id}: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+# Legacy route - redirect to new completion page
+@app.route('/fail_attention')
+def fail_attention_legacy():
+    """Legacy route - redirects to new completion page"""
+    lang = session.get('lang', 'en')
+    return redirect(f'/completion?status=attention_fail&lang={lang}')
 
 
 # ==================== STATIC FILE ROUTES ====================

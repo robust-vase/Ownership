@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from static_assets.ui_components import render_common_css
+from core.ui_components import render_common_css
 from core.translations import get_text
 
 def generate_login_html(error_message=None, lang='zh'):
@@ -258,3 +258,4 @@ def generate_login_html(error_message=None, lang='zh'):
 </body>
 </html>
 """
+
