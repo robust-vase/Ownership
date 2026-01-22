@@ -35,8 +35,8 @@ TRANSLATIONS = {
             "zh": "知情同意书"
         },
         "consent_content": {
-            "en": "This experiment is conducted for academic research purposes. Your data will be kept strictly confidential and used only for scientific analysis. Participation is voluntary, and you may withdraw at any time without penalty. By clicking 'Start Experiment', you agree to participate.",
-            "zh": "本实验仅用于学术研究目的。您的数据将被严格保密，仅用于科学分析。参与完全自愿，您可以随时退出而不会受到任何影响。点击“开始实验”即表示您同意参与。"
+            "en": "This experiment is conducted for academic research purposes. Your data will be kept strictly confidential. <br><br><strong>Note: To receive payment upon completion, you will be required to provide your Bank Account Number and Branch Name.</strong>",
+            "zh": "本实验仅用于学术研究目的。您的数据将被严格保密，仅用于科学分析。参与完全自愿，您可以随时退出而不会受到任何影响。<br><br><strong>特别声明：在完成实验后，我们需要您填写本人的银行卡账号以及开户行等信息，以便后续为您发放实验报酬。</strong>点击“开始实验”即表示您同意参与并知悉上述事项。"
         },
         "consent_checkbox": {
             "en": "I have read and agree to the above informed consent",
@@ -670,7 +670,7 @@ TRANSLATIONS = {
         },
         "tutorial_fail_message": {
             "en": "Based on your responses, your visual interpretation differs significantly from the baseline required for this study. Unfortunately, you are not eligible to continue with the main experiment. Thank you for your interest.",
-            "zh": "根据您的回答，您的视觉解读与本研究所需的基准存在显著差异。很遗憾，您不符合继续参与正式实验的条件。感谢您的关注。"
+            "zh": "很遗憾，您未通过我们实验的筛选。感谢您的参与。"
         },
         
         # Attention Fail Page
@@ -683,8 +683,8 @@ TRANSLATIONS = {
             "zh": "实验已终止"
         },
         "attention_fail_message": {
-            "en": "The experiment has been terminated due to inconsistent responses on attention check questions. This is necessary to ensure data quality.",
-            "zh": "由于您在注意力检测题目上的回答不一致，实验已被终止。这是为了确保数据质量。"
+            "en": "The experiment has been terminated due to inconsistent responses on attention check questions.",
+            "zh": "很遗憾，您错过了我们的注意筛选，实验已经被中止。"
         },
         "attention_fail_note": {
             "en": "If you believe this is an error, please contact the research team with your participant ID.",
