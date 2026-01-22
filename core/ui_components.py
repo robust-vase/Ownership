@@ -588,79 +588,76 @@ def render_core_script(objects_json, agents_json, agent_labels_json, include_sav
                 scene: typeof window.currentScene !== 'undefined' ? window.currentScene : 'unknown',
                 duration_ms: duration,
                 timestamp: Date.now(),
+                current_idx: currentIdx,
                 annotations: [],
-                attention_failed: false
+                attention_check_result: null  // Will be set if there's an attention check
             };
             
-            // Validate Attention Checks
-            var attentionFailed = false;
+            // Collect all annotations including attention checks
+            var attentionCheckResult = null;
+            
             for (var objId in window.ownerships) {
-                if (window.ownerships.hasOwnProperty(objId) && window.confirmations[objId] && objId.indexOf('attention_check_') === 0) {
+                if (window.ownerships.hasOwnProperty(objId) && window.confirmations[objId]) {
                     var val = window.ownerships[objId].confidence;
-                    var checkMeta = window.attentionCheckMeta ? window.attentionCheckMeta[objId] : null;
-                    if (checkMeta) {
-                        var passed = false;
-                        if (checkMeta.target === 'left_0') passed = val < 5;
-                        else if (checkMeta.target === 'right_100') passed = val > 95;
-                        else if (checkMeta.target === 'gt_75') passed = val > 75;
-                        else if (checkMeta.target === 'lt_25') passed = val < 25;
-                        
-                        if (!passed) {
-                            attentionFailed = true;
-                            // Strict Mode (scenes < 20): Immediate termination
-                            // Grace Mode (scenes >= 20): Log and continue
-                            if (currentIdx < 20) {
-                                // Early attention failure - redirect to exit page
-                                fetch('/save_ownerships', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ 
-                                        status: 'failed_attention', 
-                                        scene: payload.scene,
-                                        current_idx: currentIdx  // Pass current index for server-side decision
-                                    })
-                                }).then(function(res) { return res.json(); }).then(function(data) {
-                                    if (data.action === 'redirect') {
-                                        // Redirect to exit page
-                                        window.isTransitioning = false;
-                                        window.location.href = data.url;
-                                    } else if (data.action === 'reload') {
-                                        // Grace mode - continue
-                                        console.log('[Attention] Grace mode - continuing...');
-                                        window.isTransitioning = false;
-                                        btn.disabled = false;
-                                        btn.textContent = 'Save & Next';
-                                    }
-                                }).catch(function(err) {
-                                    console.error('[Attention Check] Network error:', err);
-                                    window.isTransitioning = false;
-                                    btn.disabled = false;
-                                    btn.textContent = 'Save & Next';
-                                });
-                                return;
-                            } else {
-                                // Grace mode - allow continue with warning
-                                console.log('[Attention] Grace mode - scene ' + currentIdx + ' - allowing continue');
-                                payload.attention_failed = true;
+                    
+                    // Check if this is an attention check item
+                    if (objId.indexOf('attention_check_') === 0) {
+                        var checkMeta = window.attentionCheckMeta ? window.attentionCheckMeta[objId] : null;
+                        if (checkMeta) {
+                            var passed = false;
+                            if (checkMeta.target === 'left_0') passed = val < 5;
+                            else if (checkMeta.target === 'right_100') passed = val > 95;
+                            else if (checkMeta.target === 'gt_75') passed = val > 75;
+                            else if (checkMeta.target === 'lt_25') passed = val < 25;
+                            
+                            // Get the question text from the DOM or default
+                            var questionText = '';
+                            var objItem = document.querySelector('[data-object-id="' + objId + '"]');
+                            if (objItem) {
+                                var questionEl = objItem.querySelector('.object-name');
+                                if (questionEl) questionText = questionEl.textContent;
                             }
+                            
+                            // Build attention check result for server
+                            attentionCheckResult = {
+                                object_id: objId,
+                                question: questionText || checkMeta.target,
+                                target_rule: checkMeta.target,
+                                slider_value: val,
+                                passed: passed
+                            };
+                            
+                            // Add to annotations with enhanced format
+                            payload.annotations.push({
+                                object_id: objId,
+                                question: questionText || checkMeta.target,
+                                target_rule: checkMeta.target,
+                                slider_value: val,
+                                passed: passed,
+                                agent_a_id: window.agentA ? window.agentA.id : null,
+                                agent_b_id: window.agentB ? window.agentB.id : null
+                            });
                         }
+                    } else {
+                        // Normal object annotation
+                        payload.annotations.push({
+                            object_id: objId,
+                            primary_owner_id: window.ownerships[objId].owner,
+                            confidence: val,
+                            agent_a_id: window.agentA ? window.agentA.id : null,
+                            agent_b_id: window.agentB ? window.agentB.id : null,
+                            slider_value: val
+                        });
                     }
                 }
             }
-
-            for (var objId2 in window.ownerships) {
-                if (window.ownerships.hasOwnProperty(objId2) && window.confirmations[objId2]) {
-                    payload.annotations.push({
-                        object_id: objId2,
-                        primary_owner_id: window.ownerships[objId2].owner,
-                        confidence: window.ownerships[objId2].confidence,
-                        agent_a_id: window.agentA.id,
-                        agent_b_id: window.agentB.id,
-                        slider_value: window.ownerships[objId2].confidence 
-                    });
-                }
+            
+            // Attach attention check result if found
+            if (attentionCheckResult) {
+                payload.attention_check_result = attentionCheckResult;
             }
 
+            // Send to server - let server decide the action
             fetch('/save_ownerships', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -668,25 +665,40 @@ def render_core_script(objects_json, agents_json, agent_labels_json, include_sav
             })
             .then(function(response) { return response.json(); })
             .then(function(data) {
-                if (data.status === 'success') {
-                    if (data.action === 'redirect') {
-                        // Completion or forced redirect - allowed to exit fullscreen
-                        window.isTransitioning = false;
-                        window.location.href = data.url;
-                        return;
-                    }
-                    
-                    if (data.action === 'reload') {
-                        btn.textContent = 'Loading next scene...';
-                        performSoftUpdate();
-                    }
-                } else {
+                if (data.action === 'redirect') {
+                    // Completion, termination, or forced redirect
                     window.isTransitioning = false;
-                    btn.disabled = false;
-                    btn.textContent = 'Save & Next';
-                    console.error('[Save] Server error:', data.error);
-                    showRetryMessage('Save failed. Please try again.');
+                    window.location.href = data.url;
+                    return;
                 }
+                
+                if (data.action === 'warning') {
+                    // SOFT FAIL: Show warning but continue to next scene
+                    window.isTransitioning = false;
+                    
+                    // Show warning message (alert or modal)
+                    var warningMsg = data.message || 'Attention Check Failed! Please pay closer attention.';
+                    showAttentionWarningModal(warningMsg, function() {
+                        // After user acknowledges, proceed to next scene
+                        btn.textContent = 'Loading next scene...';
+                        window.isTransitioning = true;
+                        performSoftUpdate();
+                    });
+                    return;
+                }
+                
+                if (data.action === 'reload' || data.status === 'success') {
+                    btn.textContent = 'Loading next scene...';
+                    performSoftUpdate();
+                    return;
+                }
+                
+                // Error case
+                window.isTransitioning = false;
+                btn.disabled = false;
+                btn.textContent = 'Save & Next';
+                console.error('[Save] Server error:', data.error || data.message);
+                showRetryMessage(data.message || 'Save failed. Please try again.');
             })
             .catch(function(error) {
                 console.error('[Save] Network error:', error);
@@ -695,6 +707,62 @@ def render_core_script(objects_json, agents_json, agent_labels_json, include_sav
                 btn.textContent = 'Save & Next';
                 showRetryMessage('Network error. Please check your connection and try again.');
             });
+        }
+        
+        // === ATTENTION WARNING MODAL ===
+        function showAttentionWarningModal(message, onClose) {
+            // Check if modal already exists
+            var existingModal = document.getElementById('attention-warning-modal');
+            if (existingModal) {
+                existingModal.remove();
+            }
+            
+            // Create modal overlay
+            var modal = document.createElement('div');
+            modal.id = 'attention-warning-modal';
+            modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:10000;display:flex;justify-content:center;align-items:center;';
+            
+            // Create modal content
+            var content = document.createElement('div');
+            content.style.cssText = 'background:white;padding:40px;border-radius:16px;max-width:450px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+            
+            // Warning icon
+            var icon = document.createElement('div');
+            icon.style.cssText = 'font-size:64px;margin-bottom:20px;';
+            icon.textContent = '⚠️';
+            
+            // Title
+            var title = document.createElement('h2');
+            title.style.cssText = 'color:#c53030;font-size:24px;margin-bottom:16px;';
+            title.textContent = '注意力检测未通过';
+            
+            // Message
+            var msg = document.createElement('p');
+            msg.style.cssText = 'color:#4a5568;font-size:16px;line-height:1.6;margin-bottom:24px;';
+            msg.textContent = message;
+            
+            // Button
+            var btn = document.createElement('button');
+            btn.style.cssText = 'background:#667eea;color:white;border:none;padding:14px 32px;font-size:16px;font-weight:600;border-radius:8px;cursor:pointer;transition:background 0.2s;';
+            btn.textContent = '我知道了，继续';
+            btn.onmouseover = function() { btn.style.background = '#5a67d8'; };
+            btn.onmouseout = function() { btn.style.background = '#667eea'; };
+            btn.onclick = function() {
+                modal.remove();
+                if (typeof onClose === 'function') {
+                    onClose();
+                }
+            };
+            
+            content.appendChild(icon);
+            content.appendChild(title);
+            content.appendChild(msg);
+            content.appendChild(btn);
+            modal.appendChild(content);
+            document.body.appendChild(modal);
+            
+            // Focus button for accessibility
+            btn.focus();
         }
         
         // === NON-INTRUSIVE ERROR MESSAGE ===
@@ -1192,6 +1260,7 @@ def render_core_script(objects_json, agents_json, agent_labels_json, include_sav
         function disableDimMode() {{
             document.body.classList.remove('dimmed-mode');
             document.querySelectorAll('.active-spotlight').forEach(el => el.classList.remove('active-spotlight'));
+            document.querySelectorAll('.agent-hull').forEach(h => h.style.opacity = 0);
         }}
         
         function scrollToObject(objectId) {{

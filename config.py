@@ -44,6 +44,30 @@ EXCLUDED_OWNERS = {'room', 'public'}
 EXCLUDED_TYPES = {'wall', 'window'}
 
 # ==================== Visual Mapping (Anti-Bias) ====================
+
+# ==================== Experiment Settings ====================
+# Target number of completed participants per pool
+TARGET_COMPLETED_PER_POOL = int(os.getenv('TARGET_PER_POOL', 25))
+
+# Attention check indices (0-based scene indices where attention checks are injected)
+# Rules: Failures at indices < STRICT_THRESHOLD terminate experiment immediately
+#        Failures at indices >= STRICT_THRESHOLD are logged but forgiven (soft mode)
+ATTENTION_CHECK_INDICES = [5, 10, 15, 20, 25]
+
+# Attention Check Strict Threshold
+# Indices < this value: Strict Mode (failure = block + redirect)
+# Indices >= this value: Soft Mode (failure = warning + continue)
+ATTENTION_CHECK_STRICT_THRESHOLD = 15
+
+# Attention Check Questions with their validation targets
+ATTENTION_CHECK_QUESTIONS = [
+    {"question_en": "Attention Check: Drag slider to 0 (Left)", "question_zh": "请将滑块拖到最左边 (0)", "target": "left_0"},
+    {"question_en": "Attention Check: Drag slider to 100 (Right)", "question_zh": "请将滑块拖到最右边 (100)", "target": "right_100"},
+    {"question_en": "Attention Check: Drag slider to > 75", "question_zh": "请将滑块拖到大于 75 的位置", "target": "gt_75"},
+    {"question_en": "Attention Check: Drag slider to < 25", "question_zh": "请将滑块拖到小于 25 的位置", "target": "lt_25"},
+]
+
+# ==================== Visual Mapping (Anti-Bias) ====================
 # Map specific internal types to neutral display labels to avoid semantic priming.
 DISPLAY_CATEGORY_MAPPING = {
     # Toys

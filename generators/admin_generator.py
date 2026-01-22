@@ -207,6 +207,61 @@ def generate_admin_html(pool_status, participants_summary, config_info):
             font-weight: 500;
         }
         .view-btn:hover { background: #5a67d8; }
+        .delete-btn {
+            background: #fc8181;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            margin-left: 4px;
+        }
+        .delete-btn:hover { background: #f56565; }
+        .unblock-btn {
+            background: #48bb78;
+            color: white;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .unblock-btn:hover { background: #38a169; }
+        .blocked-section {
+            margin-top: 30px;
+            background: #fff5f5;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #fed7d7;
+        }
+        .blocked-section h2 {
+            color: #c53030;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        .blocked-table {
+            width: 100%;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid #fed7d7;
+        }
+        .blocked-table th {
+            background: #fed7d7;
+            color: #c53030;
+            padding: 10px 14px;
+            text-align: left;
+            font-size: 13px;
+        }
+        .blocked-table td {
+            padding: 10px 14px;
+            border-bottom: 1px solid #fed7d7;
+            font-size: 13px;
+        }
+        .blocked-table tr:last-child td { border-bottom: none; }
         .config-info {
             background: #f7fafc;
             padding: 16px;
@@ -356,14 +411,17 @@ def generate_admin_html(pool_status, participants_summary, config_info):
         status_class = "status-" + p.get('status', 'unknown').replace(' ', '-').lower()
         user_id = p.get('user_id', 'N/A')
         participants_rows += f"""
-        <tr>
+        <tr id="row-{user_id}">
             <td title="{user_id_full}">{participant_id}</td>
             <td>{p.get('pool', '-')}</td>
             <td>{p.get('completed', 0)}/{p.get('total', 0)}</td>
             <td><span class="status-badge {status_class}">{p.get('status', 'Unknown')}</span></td>
             <td>{p.get('start_time', 'N/A')}</td>
-            <td>{p.get('demographics', {}).get('nationality', '-')}</td>
-            <td><button class="view-btn" onclick="showParticipantDetails('{user_id}')">View</button></td>
+            <td>{p.get('demographics', {}).get('ip_address', 'N/A')}</td>
+            <td>
+                <button class="view-btn" onclick="showParticipantDetails('{user_id}')">View</button>
+                <button class="delete-btn" onclick="deleteParticipant('{user_id}')">Delete</button>
+            </td>
         </tr>
         """
     
@@ -385,6 +443,107 @@ def generate_admin_html(pool_status, participants_summary, config_info):
     
     function hideModal() {
         document.getElementById('modalOverlay').classList.remove('active');
+    }
+    
+    function deleteParticipant(userId) {
+        if (!confirm(`Are you sure you want to delete participant ${userId}? This action cannot be undone.`)) {
+            return;
+        }
+        
+        fetch(`/admin/delete_participant?key=${ADMIN_KEY}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                // Remove row from table
+                const row = document.getElementById('row-' + userId);
+                if (row) row.remove();
+                alert('Participant deleted successfully. Pool stats have been updated.');
+            } else {
+                alert('Error: ' + (data.message || data.error));
+            }
+        })
+        .catch(err => {
+            alert('Error deleting participant: ' + err.message);
+        });
+    }
+    
+    function loadBlockedUsers() {
+        fetch(`/admin/blocked_users?key=${ADMIN_KEY}`)
+            .then(res => res.json())
+            .then(data => {
+                renderBlockedUsers(data.blocked || []);
+            })
+            .catch(err => {
+                document.getElementById('blocked-list').innerHTML = `<p style="color:#c53030;">Error loading blocked users: ${err.message}</p>`;
+            });
+    }
+    
+    function renderBlockedUsers(blockedList) {
+        const container = document.getElementById('blocked-list');
+        
+        if (blockedList.length === 0) {
+            container.innerHTML = '<p style="color:#718096; text-align:center; padding:20px;">No blocked IPs</p>';
+            return;
+        }
+        
+        let html = `
+            <table class="blocked-table">
+                <thead>
+                    <tr>
+                        <th>IP Address</th>
+                        <th>Reason</th>
+                        <th>Blocked At</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        
+        blockedList.forEach(entry => {
+            const ip = entry.ip || entry;
+            const reason = entry.reason || '-';
+            const blockedAt = entry.blocked_at ? entry.blocked_at.substring(0, 16).replace('T', ' ') : '-';
+            
+            html += `
+                <tr id="blocked-${ip.replace(/\\./g, '-')}">
+                    <td><code>${ip}</code></td>
+                    <td>${reason}</td>
+                    <td>${blockedAt}</td>
+                    <td><button class="unblock-btn" onclick="unblockUser('${ip}')">Unblock</button></td>
+                </tr>
+            `;
+        });
+        
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+    
+    function unblockUser(ip) {
+        if (!confirm(`Are you sure you want to unblock IP ${ip}?`)) {
+            return;
+        }
+        
+        fetch(`/admin/unblock?key=${ADMIN_KEY}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: ip })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                // Reload blocked list
+                loadBlockedUsers();
+            } else {
+                alert('Error: ' + (data.message || 'IP not found'));
+            }
+        })
+        .catch(err => {
+            alert('Error unblocking IP: ' + err.message);
+        });
     }
     
     function showParticipantDetails(userId) {
@@ -575,6 +734,8 @@ def generate_admin_html(pool_status, participants_summary, config_info):
         document.getElementById('modalOverlay').addEventListener('click', function(e) {
             if (e.target === this) hideModal();
         });
+        // Load blocked users on page load
+        loadBlockedUsers();
     });
     
     // Close modal on Escape key
@@ -647,7 +808,7 @@ def generate_admin_html(pool_status, participants_summary, config_info):
                         <th>Progress</th>
                         <th>Status</th>
                         <th>Start Time</th>
-                        <th>Nationality</th>
+                        <th>IP Address</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -655,6 +816,13 @@ def generate_admin_html(pool_status, participants_summary, config_info):
                     {participants_rows}
                 </tbody>
             </table>
+        </div>
+        
+        <div class="blocked-section">
+            <h2>🚫 Blocked IPs/Users</h2>
+            <div id="blocked-list">
+                <p style="color:#718096; text-align:center; padding:20px;">Loading...</p>
+            </div>
         </div>
         </div>
     

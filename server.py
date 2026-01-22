@@ -33,7 +33,16 @@ from core.ownership_manager import (
     reset_pool_status,
     get_participant_details,
     get_pool_aggregate_stats,
-    get_all_participant_files
+    get_all_participant_files,
+    check_participant_id_exists,
+    delete_participant,
+    get_blocked_list_detailed,
+    unblock_user,
+    save_payment_to_summary,
+    save_attention_check_failure,
+    mark_user_terminated,
+    is_user_terminated,
+    PARTICIPANTS_DIR
 )
 from core.translations import get_text
 
@@ -67,6 +76,28 @@ def get_first_image(scene_path):
             return img.name
     return None
 
+
+def get_client_ip():
+    """
+    Get the real client IP address.
+    Prioritizes X-Forwarded-For header (for reverse proxy setups)
+    and falls back to request.remote_addr.
+    
+    Returns:
+        str: The client's IP address
+    """
+    # Check X-Forwarded-For header first (used by reverse proxies like nginx, cloudflare)
+    forwarded_for = request.headers.get('X-Forwarded-For')
+    if forwarded_for:
+        # X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
+        # The first one is the original client IP
+        client_ip = forwarded_for.split(',')[0].strip()
+        return client_ip
+    
+    # Fallback to direct connection IP
+    return request.remote_addr
+
+
 # --- NEW: LOGIN ROUTES ---
 
 @app.route('/api/start_main_experiment', methods=['POST'])
@@ -83,8 +114,7 @@ def start_main_experiment():
     print(f"[INFO] start_main_experiment called for user: {user_id}")
     
     # 检查用户文件是否存在
-    from pathlib import Path
-    user_file = Path(__file__).parent / "participants_data" / f"{user_id}.json"
+    user_file = PARTICIPANTS_DIR / f"{user_id}.json"
     if not user_file.exists():
         print(f"[ERROR] User file not found: {user_file}. Session is stale, clearing...")
         session.clear()
@@ -103,8 +133,8 @@ def start_main_experiment():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # 0. 防刷检查
-    client_ip = request.remote_addr
+    # 0. 防刷检查 - Use robust IP detection
+    client_ip = get_client_ip()
     if is_blocked(client_ip):
         # Get language for error message
         lang = request.args.get('lang', session.get('lang', config.DEFAULT_LANGUAGE))
@@ -128,8 +158,15 @@ def login():
         dob_month = request.form.get('dob_month', '')
         dob = f"{dob_year}-{dob_month}" if dob_year and dob_month else ''
         
+        participant_id = request.form.get('participant_id', '').strip()
+        
+        # Check for duplicate participant ID before creating
+        if check_participant_id_exists(participant_id):
+            error_msg = get_text(lang, 'errors.duplicate_id') if get_text(lang, 'errors.duplicate_id') != 'errors.duplicate_id' else f"Participant ID '{participant_id}' already exists. Please use a different ID."
+            return generate_login_html(error_message=error_msg, lang=lang)
+        
         demographics = {
-            "participant_id": request.form.get('participant_id'),
+            "participant_id": participant_id,
             "gender": request.form.get('gender'),
             "dob": dob,
             "status": request.form.get('status'),
@@ -159,8 +196,9 @@ def logout():
 
 @app.route('/fail_screening', methods=['POST'])
 def fail_screening():
-    client_ip = request.remote_addr
-    block_user(client_ip) # 加入黑名单
+    client_ip = get_client_ip()
+    user_id = session.get('user_id', 'unknown')
+    block_user(client_ip, reason=f"screening_fail_user_{user_id}")  # 加入黑名单
     session.clear()
     return jsonify({"status": "blocked"})
 
@@ -361,45 +399,95 @@ def save_ownerships_route():
         data = request.json
         user_id = session['user_id']
         lang = session.get('lang', 'en')
+        client_ip = get_client_ip()
         
-        # Task 3: Handle attention check failure with index-based rules
-        if data.get('status') == 'failed_attention':
-            scene_name = data.get('scene', 'unknown')
-            current_idx = data.get('current_idx', 0)
-            
-            print(f"[ATTENTION FAIL] User {user_id} failed attention check at scene {scene_name} (idx={current_idx})")
-            
-            # Attention check failure rules:
-            # - At indices 5, 10, 15: Terminate experiment immediately
-            # - At indices 20, 25 (>= 20): Log but allow to continue (forgiveness rule)
-            if current_idx < 20:
-                # Hard failure - terminate experiment
-                block_user(user_id, reason=f"attention_fail_at_idx_{current_idx}")
-                return jsonify({
-                    "status": "failed",
-                    "action": "redirect",
-                    "url": f"/completion?status=attention_fail&lang={lang}"
-                })
-            else:
-                # Soft failure (forgiveness rule) - log but continue
-                print(f"[FORGIVENESS] User {user_id} failed at idx {current_idx} (>= 20) - continuing")
-                return jsonify({
-                    "status": "forgiven",
-                    "action": "reload",
-                    "message": "Attention check logged but forgiven (late stage)"
-                })
+        # SECURITY: Check if user is already terminated
+        if is_user_terminated(user_id):
+            print(f"[SECURITY] Rejected save from terminated user {user_id}")
+            return jsonify({
+                "status": "rejected",
+                "action": "redirect",
+                "url": f"/completion?status=attention_fail&lang={lang}",
+                "message": "Your session has been terminated."
+            })
         
-        scene_name = data.get('scene')
+        scene_name = data.get('scene', 'unknown')
         annotations = data.get('annotations', [])
         duration = data.get('duration_ms', 0)
-        attention_failed = data.get('attention_failed', False)
         current_idx = data.get('current_idx', 0)
+        attention_check_result = data.get('attention_check_result')  # New: detailed attention check data
         
-        # Log attention failure warning (but allow save)
-        if attention_failed and current_idx >= 20:
-            print(f"[ATTENTION WARNING] User {user_id} had attention fail at scene {scene_name} (idx={current_idx} - late stage - allowed)")
+        # Process attention check if present
+        if attention_check_result:
+            passed = attention_check_result.get('passed', True)
+            
+            if not passed:
+                # Save the failure record FIRST (evidence)
+                save_attention_check_failure(user_id, scene_name, attention_check_result, current_idx)
+                
+                print(f"[ATTENTION FAIL] User {user_id} failed at scene {scene_name} (idx={current_idx})")
+                
+                # Determine action based on threshold from config
+                strict_threshold = config.ATTENTION_CHECK_STRICT_THRESHOLD
+                
+                if current_idx < strict_threshold:
+                    # CASE 1: Strict Mode - Terminate immediately
+                    mark_user_terminated(user_id, reason=f"attention_fail_at_idx_{current_idx}")
+                    block_user(client_ip, reason=f"attention_fail_user_{user_id}_idx_{current_idx}")
+                    
+                    print(f"[STRICT FAIL] User {user_id} blocked (idx {current_idx} < threshold {strict_threshold})")
+                    
+                    return jsonify({
+                        "status": "failed",
+                        "action": "redirect",
+                        "url": f"/completion?status=attention_fail&lang={lang}"
+                    })
+                else:
+                    # CASE 2: Soft Mode - Warning but continue
+                    warning_msg = get_text(lang, 'attention.soft_fail_warning')
+                    if warning_msg == 'attention.soft_fail_warning':
+                        warning_msg = "Attention Check Failed! Please pay closer attention to the instructions." if lang == 'en' else "注意力检测未通过！请更仔细地阅读说明。"
+                    
+                    print(f"[SOFT FAIL] User {user_id} warned (idx {current_idx} >= threshold {strict_threshold})")
+                    
+                    # Still save the annotations (including the failed attention check)
+                    save_result = save_participant_results(user_id, scene_name, annotations, duration)
+                    
+                    if save_result.get('status') == 'rejected':
+                        return jsonify({
+                            "status": "rejected",
+                            "action": "redirect",
+                            "url": f"/completion?status=attention_fail&lang={lang}",
+                            "message": save_result.get('reason', 'Save rejected')
+                        })
+                    
+                    # Check for next scene
+                    next_scene, _, _ = get_next_scene(user_id)
+                    
+                    if next_scene is None:
+                        mark_user_completed(user_id)
+                        return jsonify({
+                            "status": "success",
+                            "action": "redirect",
+                            "url": f"/completion?status=success&lang={lang}"
+                        })
+                    
+                    return jsonify({
+                        "status": "warning",
+                        "action": "warning",
+                        "message": warning_msg
+                    })
         
-        save_participant_results(user_id, scene_name, annotations, duration)
+        # CASE 3: Normal save (no attention check or passed)
+        save_result = save_participant_results(user_id, scene_name, annotations, duration)
+        
+        if save_result.get('status') == 'rejected':
+            return jsonify({
+                "status": "rejected",
+                "action": "redirect",
+                "url": f"/completion?status=attention_fail&lang={lang}",
+                "message": save_result.get('reason', 'Save rejected')
+            })
         
         # 检查是否还有下一题
         next_scene, _, _ = get_next_scene(user_id)
@@ -418,6 +506,8 @@ def save_ownerships_route():
             "action": "reload" 
         })
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 
@@ -482,6 +572,59 @@ def admin_reset():
     
     new_status = reset_pool_status()
     return jsonify({"status": "reset", "new_status": new_status})
+
+
+@app.route('/admin/delete_participant', methods=['POST'])
+def admin_delete_participant():
+    """Delete a participant and update pool statistics."""
+    admin_key = request.args.get('key', '')
+    if admin_key != 'brain2026':
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    data = request.json
+    user_id = data.get('user_id')
+    
+    if not user_id:
+        return jsonify({"error": "user_id required"}), 400
+    
+    result = delete_participant(user_id)
+    
+    if result['status'] == 'success':
+        return jsonify(result)
+    else:
+        return jsonify(result), 404
+
+
+@app.route('/admin/blocked_users')
+def admin_blocked_users():
+    """Get list of blocked users/IPs."""
+    admin_key = request.args.get('key', '')
+    if admin_key != 'brain2026':
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    blocked_list = get_blocked_list_detailed()
+    return jsonify({"blocked": blocked_list})
+
+
+@app.route('/admin/unblock', methods=['POST'])
+def admin_unblock():
+    """Unblock an IP address."""
+    admin_key = request.args.get('key', '')
+    if admin_key != 'brain2026':
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    data = request.json
+    ip_address = data.get('ip')
+    
+    if not ip_address:
+        return jsonify({"error": "ip required"}), 400
+    
+    success = unblock_user(ip_address)
+    
+    if success:
+        return jsonify({"status": "success", "message": f"IP {ip_address} unblocked"})
+    else:
+        return jsonify({"status": "not_found", "message": "IP not found in blocked list"})
 
 
 @app.route('/api/pool_status')
@@ -573,7 +716,7 @@ def completion_page():
 def submit_payment_info():
     """
     API endpoint to save payment information for successful participants.
-    Saves payment info to the participant's JSON file.
+    Saves payment info to the participant's JSON file and the central summary file.
     """
     user_id = session.get('user_id')
     if not user_id:
@@ -593,7 +736,6 @@ def submit_payment_info():
         }
         
         # Load participant file and add payment info
-        from core.ownership_manager import PARTICIPANTS_DIR
         participant_file = PARTICIPANTS_DIR / f"{user_id}.json"
         
         if participant_file.exists():
@@ -605,6 +747,9 @@ def submit_payment_info():
             
             with open(participant_file, 'w', encoding='utf-8') as f:
                 json.dump(participant_data, f, indent=2, ensure_ascii=False)
+            
+            # Also save to central payment summary file
+            save_payment_to_summary(user_id, payment_info)
             
             print(f"[PAYMENT] Saved payment info for user {user_id}")
             return jsonify({"status": "success", "message": "Payment info saved"})

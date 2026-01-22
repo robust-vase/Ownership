@@ -14,31 +14,24 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.data_processor import process_scene_data
 from core.translations import get_text
 from core.ui_components import render_common_css, render_left_panel_html, render_right_panel_html, render_core_script
-
+import config
 
 import random
 
-# Attention Check Questions with their validation targets
-# 这些题目会自动混入右侧列表，但不会在图片上显示框框
-ATTENTION_CHECK_QUESTIONS = [
-    {"question_en": "Attention Check: Drag slider to 0 (Left)", "question_zh": "请将滑块拖到最左边 (0)", "target": "left_0"},
-    {"question_en": "Attention Check: Drag slider to 100 (Right)", "question_zh": "请将滑块拖到最右边 (100)", "target": "right_100"},
-    {"question_en": "Attention Check: Drag slider to > 75", "question_zh": "请将滑块拖到大于 75 的位置", "target": "gt_75"},
-    {"question_en": "Attention Check: Drag slider to < 25", "question_zh": "请将滑块拖到小于 25 的位置", "target": "lt_25"},
-]
+# Attention Check Questions - imported from centralized config
+ATTENTION_CHECK_QUESTIONS = config.ATTENTION_CHECK_QUESTIONS
 
 
 def should_inject_attention_check(current_idx):
     """
     Attention check injection logic:
-    Triggers at specific indices: 5, 10, 15, 20, 25
+    Triggers at specific indices defined in config.ATTENTION_CHECK_INDICES
     
     Rules for attention check failures:
     - Failures at indices 5, 10, 15: Terminate experiment immediately
     - Failures at indices 20, 25: Log but continue (forgiveness rule)
     """
-    attention_check_indices = [5, 10, 15, 20, 25]
-    return current_idx in attention_check_indices
+    return current_idx in config.ATTENTION_CHECK_INDICES
 
 
 def generate_html_page(scene_data, camera_data, image_filename, image_url, scene_name, current_idx, total_count, lang='en'):
